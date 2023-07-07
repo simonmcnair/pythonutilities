@@ -1,58 +1,79 @@
 import os
-import csv
+import sys
 import hashlib
-import shutil
+import csv
 import threading
-from multiprocessing import Pool
 
-def compute_checksums(file_path):
+# function to calculate SHA-1 hash of a file
+def calculate_hash(file_path):
+    sha1_hash = hashlib.sha1()
+    with open(file_path, "rb") as f:
+        while True:
+            data = f.read(1024)
+            if not data:
+                break
+            sha1_hash.update(data)
+    return sha1_hash.hexdigest()
+
+# function to process a single archive file
+def process_archive(archive_path, log_file):
     try:
-        with open(file_path, 'rb') as f:
-            hasher = hashlib.sha256()
-            buf = f.read(65536)
-            while len(buf) > 0:
-                hasher.update(buf)
-                buf = f.read(65536)
-            return hasher.hexdigest()
+        with open(archive_path, "rb") as f:
+            magic_number = f.read(2)
+            f.seek(0)
+            if magic_number == b"PK":
+                # zip archive
+                import zipfile
+                with zipfile.ZipFile(archive_path) as zip_file:
+                    for member in zip_file.infolist():
+                        file_hash = calculate_hash(zip_file.extract(member))
+                        log_file.writerow([os.path.abspath(member.filename), archive_path, file_hash])
+            elif magic_number == b"Rar":
+                # rar archive
+                import rarfile
+                with rarfile.RarFile(archive_path) as rar_file:
+                    for member in rar_file.infolist():
+                        file_hash = calculate_hash(rar_file.extract(member))
+                        log_file.writerow([os.path.abspath(member.filename), archive_path, file_hash])
+            elif magic_number == b"\x1f\x8b":
+                # gzip archive
+                import tarfile
+                with tarfile.open(archive_path, "r:gz") as tar_file:
+                    for member in tar_file.getmembers():
+                        file_hash = calculate_hash(tar_file.extractfile(member))
+                        log_file.writerow([os.path.abspath(member.name), archive_path, file_hash])
+            elif magic_number == b"BZ":
+                # bzip2 archive
+                import tarfile
+                with tarfile.open(archive_path, "r:bz2") as tar_file:
+                    for member in tar_file.getmembers():
+                        file_hash = calculate_hash(tar_file.extractfile(member))
+                        log_file.writerow([os.path.abspath(member.name), archive_path, file_hash])
+            elif magic_number == b"7z":
+                # 7zip archive
+                import py7zr
+                with py7zr.SevenZipFile(archive_path, "r") as zip_file:
+                    for member in zip_file.getnames():
+                        file_hash = calculate_hash(zip_file.extract(member))
+                        log_file.writerow([os.path.abspath(member), archive_path, file_hash])
+            elif magic_number == b"\xD0\xCF":
+                # Microsoft Office Document
+                import msilib
+                with msilib.CAB(archive_path) as cab_file:
+                    for member in cab_file.getmembers():
+                        file_hash = calculate_hash(cab_file.extract(member))
+                        log_file.writerow([os.path.abspath(member.name), archive_path, file_hash])
+            else:
+                print(f"Unknown file type: {archive_path}")
     except Exception as e:
-        print(f"Failed to compute checksum for {file_path}: {e}")
-        return None
+        print(f"Error processing archive {archive_path}: {e}")
+        os.makedirs("badarchives", exist_ok=True)
+        os.rename(archive_path, os.path.join("badarchives", os.path.basename(archive_path)))
 
-def extract_archive(archive_path, dest_dir):
-    try:
-        shutil.unpack_archive(archive_path, dest_dir)
-        print(f"Extracted {archive_path}")
-    except Exception as e:
-        print(f"Failed to extract {archive_path}: {e}")
-        os.rename(archive_path, os.path.join(os.path.dirname(archive_path), "badarchives", os.path.basename(archive_path)))
-
-def process_archive(root_dir, archive_path, log_file):
-    archive_name = os.path.basename(archive_path)
-    dest_dir = os.path.join(root_dir, os.path.splitext(archive_name)[0])
-    os.makedirs(dest_dir, exist_ok=True)
-    extract_archive(archive_path, dest_dir)
-    for dirpath, dirnames, filenames in os.walk(dest_dir):
-        for filename in filenames:
-            file_path = os.path.join(dirpath, filename)
-            checksum = compute_checksums(file_path)
-            if checksum is not None:
-                log_file.writerow([file_path, archive_name, checksum])
-    shutil.rmtree(dest_dir)
-
-def process_archives_in_dir(root_dir):
-    with open(os.path.join(root_dir, "checksums.csv"), 'w', newline='') as f:
-        log_file = csv.writer(f)
-        log_file.writerow(["File Path", "Archive Name", "SHA-256 Checksum"])
-        archives = [os.path.join(root, file) for root, dirs, files in os.walk(root_dir) for file in files if os.path.splitext(file)[1] in ['.zip', '.msi', '.tar', '.rar', '.7z']]
-        pool = Pool()
-        for archive_path in archives:
-            pool.apply_async(process_archive, (root_dir, archive_path, log_file))
-        pool.close()
-        pool.join()
-
-if __name__ == '__main__':
-    root_dir = input("Enter the directory path to scan: ")
-    if not os.path.isdir(root_dir):
-        print("Invalid directory path.")
-    else:
-        process_archives_in_dir(root_dir)
+# function to process all archives in a directory
+def process_directory(directory):
+    log_filename = os.path.join(directory, "archive_checksums.csv")
+    with open(log_filename, "w", newline="") as log_file:
+        log_writer = csv.writer(log_file)
+        log_writer.writerow(["File path", "Archive path", "SHA-1 hash"])
+        for root, _, filenames
