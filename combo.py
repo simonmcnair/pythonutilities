@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 from typing import Mapping, Tuple, Dict
 import pandas as pd
@@ -8,7 +9,6 @@ from PIL import Image
 from huggingface_hub import hf_hub_download
 from onnxruntime import InferenceSession
 import concurrent.futures
-import io
 import subprocess
 # Needs exiftool too
 
@@ -16,7 +16,25 @@ import subprocess
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.tif', '.tiff', '.bmp')
 TEXT_EXTENSIONS = ('.txt',)
 
+def log_error(msg):
+    print(msg)
+    with open('error.log', 'a') as f:
+        f.write(msg + '\r\n')
 
+def update_progress(progress, eta):
+    # Update progress bar and ETA
+    progress_bar_width = 50
+    progress_bar = '=' * int(progress_bar_width * progress)
+    percent_complete = int(progress * 100)
+    log_error(f"\r[{progress_bar:<{progress_bar_width}}] {percent_complete}% - ETA: {format_eta(eta)}", end='')
+
+
+def format_eta(seconds):
+    # Format ETA as HH:MM:SS
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    seconds = int(seconds % 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 # noinspection PyUnresolvedReferences
 def make_square(img, target_size):
@@ -181,7 +199,7 @@ def image_to_wd14_tags(image:Image.Image) \
 
 def build_command(img_path, tags):
     try:
-        cmd = ['exiftool', '-overwrite_original']
+        cmd = ['exiftool', '-overwrite_original', '-P']
         existing_tags = subprocess.check_output(['exiftool', '-P' , '-s', '-sep', ',', '-XMP:Subject', '-IPTC:Keywords', img_path]).decode().strip()
 
         existing_xmp_tags = []
@@ -191,7 +209,8 @@ def build_command(img_path, tags):
                 existing_xmp_tags.extend(tag.split(':')[1].strip().split(','))
             elif tag.startswith('Keywords'):
                 existing_iptc_tags.extend(tag.split(':')[1].strip().split(','))
-
+        log_error(img_path + " Current XMP tags are " + str(existing_xmp_tags))
+        log_error(img_path + " Current iptc tags are " + str(existing_iptc_tags))
         updated = False
         for tag in tags:
             tag = tag.strip()
@@ -213,24 +232,74 @@ def build_command(img_path, tags):
         log_error("error " + e)
 
 
-def validate_tags(img_path, tags):
+def dupe_tags(img_path):
     try:
         
-        #print("Running exiftool command")
+        #log_error("Running exiftool command")
         #result = subprocess.run(['exiftool', '-P', '-s', '-sep', ',', '-XMP:Subject', '-IPTC:Keywords', img_path], capture_output=True, text=True)
         #output = result.stdout.strip()
         #return_code = result.returncode
+        Dupes = False
         
         existing_tags = subprocess.check_output(['exiftool', '-P' , '-s', '-sep', ',', '-XMP:Subject', '-IPTC:Keywords', img_path]).decode().strip()
 
+        #exiftool -XMP:Subject-=''
+
         if "error" in existing_tags.lower():
-            print("Error " + existing_tags)
+            log_error(img_path + ".  Error " + existing_tags)
+            return False
 
         existing_xmp_tags = []
         existing_iptc_tags = []
         duplicate_tags = {}  # Dictionary to store duplicate tags and their counts
 
-        for tag in existing_tags.split('\r\n'):
+        for tag in existing_tags.split('\n'):
+            if tag.startswith('Subject'):
+                existing_xmp_tags.extend(tag.split(':')[1].strip().split(','))
+            elif tag.startswith('Keywords'):
+                existing_iptc_tags.extend(tag.split(':')[1].strip().split(','))
+
+            xmp_count = existing_xmp_tags.count(tag)
+            iptc_count = existing_iptc_tags.count(tag)
+            if xmp_count > 1 or iptc_count > 1:
+                log_error(img_path + ".  multiple tag occurance of " + tag)
+                duplicate_tags[tag] = xmp_count + iptc_count  # Store tag and its total count
+                Dupes = True
+
+        if Dupes:
+            log_error(img_path + ".  Duplicate tags.")
+            for tag, count in duplicate_tags.items():
+                log_error(f"{tag}: {count} times")  # Print tag and its count
+            return True
+        else:
+            log_error(img_path + ".  No Duplicate tags.")
+            return False
+    except subprocess.CalledProcessError as e:
+        log_error(img_path + ".  Error " + str(e.returncode) + " removing duplicate tags:" + e.output + ".")
+        return False
+
+def validate_tags(img_path, tags):
+    try:
+        
+        #log_error("Running exiftool command")
+        #result = subprocess.run(['exiftool', '-P', '-s', '-sep', ',', '-XMP:Subject', '-IPTC:Keywords', img_path], capture_output=True, text=True)
+        #output = result.stdout.strip()
+        #return_code = result.returncode
+        Dupes = False
+        
+        existing_tags = subprocess.check_output(['exiftool', '-P' , '-s', '-sep', ',', '-XMP:Subject', '-IPTC:Keywords', img_path]).decode().strip()
+
+        #exiftool -XMP:Subject-=''
+
+        if "error" in existing_tags.lower():
+            log_error(img_path + ".  Error " + existing_tags)
+            return False
+
+        existing_xmp_tags = []
+        existing_iptc_tags = []
+        duplicate_tags = {}  # Dictionary to store duplicate tags and their counts
+
+        for tag in existing_tags.split('\n'):
             if tag.startswith('Subject'):
                 existing_xmp_tags.extend(tag.split(':')[1].strip().split(','))
             elif tag.startswith('Keywords'):
@@ -239,51 +308,47 @@ def validate_tags(img_path, tags):
         for tag in tags:
             tag = tag.strip()
             if tag and tag not in existing_xmp_tags and tag not in existing_iptc_tags:
-                log_error("FAiled to udpate " + tag)
+                log_error(img_path + ".  tag " + " is missing from " + img_path)
                 return False
             elif tag:
                 xmp_count = existing_xmp_tags.count(tag)
                 iptc_count = existing_iptc_tags.count(tag)
                 if xmp_count > 1 or iptc_count > 1:
-                    log_error("multiple tag occurance of " + tag)
+                    log_error(img_path + ".  multiple tag occurance of " + tag)
                     duplicate_tags[tag] = xmp_count + iptc_count  # Store tag and its total count
+                    Dupes = True
 
-        if duplicate_tags:
-            log_error("Duplicate tags:")
+        if Dupes:
+            log_error(img_path + ".  Duplicate tags.  Try to remove them")
             for tag, count in duplicate_tags.items():
                 log_error(f"{tag}: {count} times")  # Print tag and its count
-
             deldupetags(img_path)
 
         return True
     except subprocess.CalledProcessError as e:
-        log_error("Error removing duplicate tags:", e)
-        return False    
+        log_error(img_path + ".  Error " + str(e.returncode) + " removing duplicate tags:" + e.output + ".")
+        return False
 
 def deldupetags(path):
     try:
-        print("Removing duplicate tags")
-        output_xmp = subprocess.check_output(['exiftool', '-P', '-m', '-sep', '##', '-XMP:Subject<${XMP:Subject;NoDups}', path], stderr=subprocess.STDOUT, universal_newlines=True)
-        output_iptc = subprocess.check_output(['exiftool', '-P', '-m', '-sep', '##', '-iptc:keywords<${iptc:keywords;NoDups}', path], stderr=subprocess.STDOUT, universal_newlines=True)
-        print("Duplicate tags removed successfully.")
-        print("XMP output was " + output_xmp)
-        print("iptc output was " + output_iptc)
+        log_error(path + ": Removing duplicate tags")
+        output_xmp = subprocess.check_output(['exiftool', '-overwrite_original' ,'-P', '-m', '-sep', '##', '-XMP:Subject<${XMP:Subject;NoDups}', path], stderr=subprocess.STDOUT, universal_newlines=True)
+        output_iptc = subprocess.check_output(['exiftool', '-overwrite_original', '-P', '-m', '-sep', '##', '-iptc:keywords<${iptc:keywords;NoDups}', path], stderr=subprocess.STDOUT, universal_newlines=True)
+        log_error("Duplicate tags removed successfully." + path)
+        log_error(path + ": XMP output was " + output_xmp)
+        log_error(path + ": iptc output was " + output_iptc)
         return True
     except subprocess.CalledProcessError as e:
-        print("Error " + e.returncode + " removing duplicate tags:" + e.output + ".")
+        log_error("Error for " + path + ". Retcode: " + e.returncode + " removing duplicate tags:" + e.output + ".")
         return False
     
 
-def log_error(msg):
-    print(msg)
-    with open('error.log', 'a') as f:
-        f.write(msg + '\r\n')
 
 def check_and_del_text_file(file_path, words):
     # Check if the file exists
     if not os.path.isfile(file_path):
         # If the file doesn't exist, create it and write the words
-        log_error("No text metadata file exists.  Great " + file_path)
+        log_error("No text metadata file exists.  Great.  Awesome.  Super.  Smashing.")
     else:
         # Read the contents of the text file
         with open(file_path, 'r') as file:
@@ -305,6 +370,31 @@ def check_and_del_text_file(file_path, words):
             log_error("All words already present in " + file_path + " Delete the file")
             delete_file(file_path)
 
+def is_photo_tagged(photo_path):
+    try:
+        output = subprocess.check_output(['exiftool', '-P', '-s', '-XMP-acdsee:tagged', photo_path]).decode().strip()
+        #log_error("output: " + output)
+        if 'true' in output.lower():
+            log_error(photo_path + " already tagged")
+            return True
+        else:
+            log_error(photo_path + " untagged.")
+            return False
+    except subprocess.CalledProcessError as e:
+        log_error("Error " + e.returncode + " removing duplicate tags:" + e.output + ".")
+        return False
+
+def make_photo_tagged(photo_path):
+    try:
+        output = subprocess.check_output(['exiftool', '-overwrite_original', '-P', '-s', '-XMP-acdsee:tagged=true', photo_path]).decode().strip()
+        log_error(photo_path + ".  Marked as TAGGED !  Output: " + output)
+        if 'updated' in output.lower():
+            return True
+        return False
+    except subprocess.CalledProcessError as e:
+        log_error("Error " + e.returncode + " removing duplicate tags:" + e.output + ".  From " + photo_path)
+        return False
+
 def delete_file(file_path):
     if '.txt' in file_path.lower():
         try:
@@ -320,11 +410,18 @@ def process_file(image_path):
     #image_path = 'C:\\Users\\Simon\\Downloads\\w6bgPUV.png'
     try:
         log_error("Processing " + image_path)
+        if is_photo_tagged(image_path):
+            log_error(image_path + " is already tagged")
+            if dupe_tags(image_path) :
+                deldupetags(image_path)
+            return
+
         image = Image.open(image_path)
         output_file = os.path.splitext(image_path)[0] + ".txt"
 
         gr_ratings, gr_output_text, gr_tags = image_to_wd14_tags(image)
 
+        #gr_output_text = gr_output_text + ',tagged'
         tagdict = gr_output_text.split(",")
         log_error("caption: " + gr_output_text)
 
@@ -335,18 +432,27 @@ def process_file(image_path):
             #log_error(str(cmd))
             try:
                 ret = subprocess.run(cmd, stderr=subprocess.STDOUT, universal_newlines=True)
-                if ret.returncode == 0 :
-                    print("Exiftool completed successfully: " + str(ret.returncode))
+                print("Exiftool update completed without error")
+                #if ret.returncode == 0 :
+                #    log_error("Exiftool completed successfully: " + str(ret.returncode))
+            except Exception as e:
+                log_error("Error updating tags for : " + image_path + ". Error: " + str(e) + ". output from command: " + (ret) + ". command line was: " + (str(cmd)))
+
+
+            try:
                 if validate_tags(image_path, tagdict):
                     log_error("tags added correctly")
                     check_and_del_text_file(output_file,gr_output_text)
+                    make_photo_tagged(image_path)
                 else:
                     log_error(f"Error: Tags were not added correctly for {image_path}")
             except Exception as e:
-                log_error("Error on " + image_path + ". " + str(e) + "command line was: " + (str(cmd)))
+                log_error("Error validating tags: " + ". " + image_path + ". " + str(e) )
+
         else:
-            log_error("no update needed")
+            log_error("Tags are already correct.  Nothing to do.  AWESOME !")
             check_and_del_text_file(output_file,gr_output_text)
+            make_photo_tagged(image_path)
     except Exception as e:
         log_error("error " + e)
 
@@ -376,43 +482,52 @@ def process_images_in_directory(directory):
             futures.append(future)
 
         # Iterate over completed futures
-        for future in concurrent.futures.as_completed(futures):
-            processed_images += 1
-            elapsed_time = future.result()
-            average_time_per_image = (average_time_per_image * (processed_images - 1) + elapsed_time) / processed_images
-
+    #    for future in concurrent.futures.as_completed(futures):
+          #  processed_images += 1
+          #  elapsed_time = future.result()
+          #  average_time_per_image = (average_time_per_image * (processed_images - 1) + elapsed_time) / processed_images
+    #        print("Future: " + str(future))
             # Update progress bar
-            progress = processed_images / num_images
-            eta = (num_images - processed_images) * average_time_per_image
-            print("Test" + progress + "." + eta)
-            update_progress(progress, eta)
-
-    print("Processing complete!")
+          #  progress = processed_images / num_images
+          #  eta = (num_images - processed_images) * average_time_per_image
+          #  log_error("Test" + progress + "." + eta)
+          #  update_progress(progress, eta)
 
 
-def update_progress(progress, eta):
-    # Update progress bar and ETA
-    progress_bar_width = 50
-    progress_bar = '=' * int(progress_bar_width * progress)
-    percent_complete = int(progress * 100)
-    print(f"\r[{progress_bar:<{progress_bar_width}}] {percent_complete}% - ETA: {format_eta(eta)}", end='')
 
-
-def format_eta(seconds):
-    # Format ETA as HH:MM:SS
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    seconds = int(seconds % 60)
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
 
 # Specify the directory containing the images
-#image_directory = 'X:\Stable\dif\stable-diffusion-webui-docker\output'
-#image_directory = 'X:\\Stable\\dif\\stable-diffusion-webui-docker\\output\\img2img\\2023-05-17\\'
-image_directory = '/srv/dev-disk-by-uuid-e83913b3-e590-4dc8-9b63-ce0bdbe56ee9/Stable/dif/stable-diffusion-webui-docker/output'
 
 # Process the images in the directory and generate captions
-process_images_in_directory(image_directory)
+#process_images_in_directory(image_directory)
+
+def execute_script(directory=None):
+    if directory is None:
+        if os.name == 'nt':  # Windows
+            #directory = r'X:\\Stable\\dif\\stable-diffusion-webui-docker\\output'
+            directory = r'Z:\\Pron\\Pics\\Sets\\M_Q^uis\\New folder (12)'
+        else:  # Linux or macOS
+            directory = '/srv/dev-disk-by-uuid-e83913b3-e590-4dc8-9b63-ce0bdbe56ee9/Stable/dif/stable-diffusion-webui-docker/output'
+
+
+    # Change the current working directory to the specified directory
+    #os.chdir(directory)
+
+    # Execute your script here
+    # For demonstration purposes, let's print the current working directory
+    #log_error("Current working directory:", os.getcwd())
+    process_images_in_directory(directory)
+    log_error("Processing complete!")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        # Use the directory provided as a command line argument
+        execute_script(sys.argv[1])
+    else:
+        # Use the predefined directory if no command line argument is provided
+        execute_script()
 
 
 
