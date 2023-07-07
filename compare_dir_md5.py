@@ -1,8 +1,8 @@
 import os
-import json
 import hashlib
+import json
 
-# Define the two directories to search
+# define the directories to scan
 dir1 = "/srv/External_6TB_1/root/Videos/"
 dir2 = "/srv/mergerfs/data/Video2"
 
@@ -15,12 +15,10 @@ file_list = []
 # recursively traverse both directories and store the file paths and names
 for root, dirs, files in os.walk(dir1):
     for file in files:
-        print("Adding " + file)
         file_list.append((root, file))
 
 for root, dirs, files in os.walk(dir2):
     for file in files:
-        print("Adding " +file)
         file_list.append((root, file))
 
 # sort the file list by filename
@@ -36,18 +34,17 @@ if os.path.exists(hash_file):
 for path, file in file_list:
     full_path = os.path.join(path, file)
     if full_path not in hashes:
-        print("Hashing " + full_path)
+        print("Generating hash for " + full_path)
         with open(full_path, "rb") as f:
             hash_object = hashlib.sha256()
             hash_object.update(f.read())
             hash_value = hash_object.hexdigest()
         hashes[full_path] = hash_value
         print(f"Generated hash for {full_path}: {hash_value}")
-
     else:
         print(f"Skipping {full_path}, already hashed")
-        # check for duplicates and print them
-        duplicate_paths = [p for p in hashes.keys() if hashes[p] == hashes[full_path]]
+        # check for a single matching duplicate
+        duplicate_path = next((p for p in hashes.keys() if hashes[p] == hashes[full_path] and p != full_path), None)
         if duplicate_path is not None:
             print(f"Duplicate hash value {hashes[full_path]} found for {full_path} and {duplicate_path}")
         else:
@@ -55,7 +52,7 @@ for path, file in file_list:
 
 # write the updated hash file
 with open(hash_file, "w") as f:
-    json.dump(hashes, f, indent=4)
+    json.dump(hashes, f)
 
 # create a file containing all unique hash values
 unique_hashes = list(set(hashes.values()))
