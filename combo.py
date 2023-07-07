@@ -579,24 +579,19 @@ def process_file(image_path):
             if  os.path.isfile(output_file):
                 log_error(image_path + ".  Need to process as there is a " + output_file + " file which could be deleted.")
             else:
-                log_error(image_path + ".  All tags are correct and no dupe tags.  Skipping")
+                log_error(image_path + ".  All tags are correct and no dupe tags.  Continue")
                 return True
         else:
             log_error("Processfile " + image_path + " not marked as processed.  Continue processing ")
 
-        try:
-            image = Image.open(image_path)
-        except Exception as e:
-            log_error("Processfile Exception1: " + " failed to open image : " + image_path + ". Error: " + str(e) + ". output from command: " + str(ret) + ".  Skipping")
-            return False
+        image = Image.open(image_path)
 
         try:
             gr_ratings, gr_output_text, gr_tags = image_to_wd14_tags(image)
             #gr_output_text = gr_output_text + ',tagged'
             tagdict = gr_output_text.split(",")
         except Exception as e:
-            log_error("Processfile substr" + "Well that didn't work.  Skipping")
-            return false
+            log_error("Processfile substr" + "Well that didn't work.")
 
         
         try:
