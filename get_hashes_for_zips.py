@@ -1,86 +1,65 @@
-import os
-import sys
 import hashlib
+import os
 import csv
-import threading
-import queue
-import logging
-import traceback
-import shutil
 import zipfile
 import tarfile
 import rarfile
-import lzma
-import argparse
+import libarchive.public as public
+from msilib import SummaryInformation
 
-logging.basicConfig(level=logging.INFO, filename='archive_processing.log', filemode='w', format='%(asctime)s - %(levelname)s - %(message)s')
-
-ARCHIVE_FORMATS = ['.zip', '.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tbz2', '.tar.xz', '.txz', '.rar', '.7z', '.msi', '.msm', '.msp', '.msu']
-BAD_ARCHIVES_DIR = 'bad_archives'
-
-class ArchiveProcessor:
-    def __init__(self, queue, output_file):
-        self.queue = queue
-        self.output_file = output_file
-
-    def run(self):
+def get_file_checksum(file_path, algorithm="sha1", block_size=65536):
+    """
+    Calculate the checksum of a file using the given algorithm.
+    """
+    hash_algo = hashlib.new(algorithm)
+    with open(file_path, "rb") as f:
         while True:
-            try:
-                archive_file = self.queue.get(timeout=1)
-                self.process_archive(archive_file)
-                self.queue.task_done()
-            except queue.Empty:
+            data = f.read(block_size)
+            if not data:
                 break
-            except Exception as e:
-                logging.error(f"Error processing archive: {archive_file}")
-                logging.error(traceback.format_exc())
+            hash_algo.update(data)
+    return hash_algo.hexdigest()
 
-    def process_archive(self, archive_file):
-        try:
-            archive_name = os.path.basename(archive_file)
-            logging.info(f"Processing archive: {archive_name}")
-            sha1_dict = {}
+def process_archive(archive_path, log_file):
+    """
+    Process an archive and write its checksums to the log file.
+    """
+    archive_name = os.path.basename(archive_path)
+    archive_type = os.path.splitext(archive_path)[1].lower()
+    try:
+        if archive_type == ".zip":
+            archive = zipfile.ZipFile(archive_path)
+        elif archive_type == ".tar":
+            archive = tarfile.TarFile(archive_path)
+        elif archive_type == ".rar":
+            archive = rarfile.RarFile(archive_path)
+        else:
+            archive = public.file_reader(archive_path, "7zip")
+        
+        for member in archive.getmembers():
+            if member.isfile():
+                member_path = os.path.join(archive_path, member.name)
+                checksum = get_file_checksum(member_path)
+                log_file.writerow([os.path.abspath(member_path), archive_name, checksum])
+    except Exception as e:
+        print(f"Error processing {archive_path}: {e}")
+        bad_archive_path = os.path.join(os.path.dirname(archive_path), "badarchives", os.path.basename(archive_path))
+        os.rename(archive_path, bad_archive_path)
+        
 
-            # extract archive
-            with self.extract_archive(archive_file) as extract_dir:
-                # calculate sha1 checksum for each file in the archive
-                for root, dirs, files in os.walk(extract_dir):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        with open(file_path, 'rb') as f:
-                            sha1 = hashlib.sha1(f.read()).hexdigest()
-                            sha1_dict[file_path] = sha1
+def process_directory(directory_path):
+    """
+    Recursively process all archives in the given directory.
+    """
+    with open("log.csv", "w", newline="") as f:
+        log_file = csv.writer(f)
+        log_file.writerow(["File Path", "Archive Name", "Checksum"])
+        for root, dirs, files in os.walk(directory_path):
+            for file_name in files:
+                file_path = os.path.join(root, file_name)
+                if os.path.splitext(file_name)[1].lower() in [".zip", ".tar", ".rar", ".7z"]:
+                    process_archive(file_path, log_file)
 
-            # write results to output file
-            with open(self.output_file, mode='a', newline='') as output_csv:
-                writer = csv.writer(output_csv)
-                for file_path, sha1 in sha1_dict.items():
-                    writer.writerow([archive_file, file_path, sha1])
-        except Exception as e:
-            logging.error(f"Error processing archive: {archive_file}")
-            logging.error(traceback.format_exc())
-
-    def extract_archive(self, archive_file):
-        try:
-            if not os.path.exists(BAD_ARCHIVES_DIR):
-                os.makedirs(BAD_ARCHIVES_DIR)
-
-            # create a temporary directory to extract archive
-            extract_dir = os.path.join(os.path.dirname(archive_file), '__extracted__')
-            os.makedirs(extract_dir, exist_ok=True)
-
-            # extract archive
-            archive_name, ext = os.path.splitext(archive_file)
-            if ext == '.zip':
-                with zipfile.ZipFile(archive_file, 'r') as zip_ref:
-                    zip_ref.extractall(extract_dir)
-            elif ext in ['.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tbz2', '.tar.xz', '.txz']:
-                with tarfile.open(archive_file, 'r:*') as tar_ref:
-                    tar_ref.extractall(extract_dir)
-            elif ext == '.rar':
-                with rarfile.RarFile(archive_file, 'r') as rar_ref:
-                    rar_ref.extractall(extract_dir)
-            elif ext == '.7z':
-                with lzma.open(archive_file) as file_ref:
-                    with open(os.path.join(extract_dir, '__temp.7z'), 'wb') as temp_file:
-                        shutil.copyfileobj(file_ref,
+if __name__ == "__main__":
+    directory_path = input("Enter directory path: ")
+    process_directory(directory_path)
