@@ -10,6 +10,8 @@ from onnxruntime import InferenceSession
 import concurrent.futures
 import io
 import subprocess
+# Needs exiftool too
+
 
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.tif', '.tiff', '.bmp')
 TEXT_EXTENSIONS = ('.txt',)
@@ -360,15 +362,54 @@ def process_images_in_directory(directory):
                 image_path = os.path.join(root, file)
                 image_paths.append(image_path)
 
+    num_images = len(image_paths)
+    processed_images = 0
+    average_time_per_image = 0
+
+#    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        # Process the images concurrently
-        executor._max_workers=4
-        executor.map(process_file, image_paths)
+        futures = []
+ 
+        # Submit the image processing tasks
+        for image_path in image_paths:
+            future = executor.submit(process_file, image_path)
+            futures.append(future)
+
+        # Iterate over completed futures
+        for future in concurrent.futures.as_completed(futures):
+            processed_images += 1
+            elapsed_time = future.result()
+            average_time_per_image = (average_time_per_image * (processed_images - 1) + elapsed_time) / processed_images
+
+            # Update progress bar
+            progress = processed_images / num_images
+            eta = (num_images - processed_images) * average_time_per_image
+            print("Test" + progress + "." + eta)
+            update_progress(progress, eta)
+
+    print("Processing complete!")
+
+
+def update_progress(progress, eta):
+    # Update progress bar and ETA
+    progress_bar_width = 50
+    progress_bar = '=' * int(progress_bar_width * progress)
+    percent_complete = int(progress * 100)
+    print(f"\r[{progress_bar:<{progress_bar_width}}] {percent_complete}% - ETA: {format_eta(eta)}", end='')
+
+
+def format_eta(seconds):
+    # Format ETA as HH:MM:SS
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    seconds = int(seconds % 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
 
 # Specify the directory containing the images
 #image_directory = 'X:\Stable\dif\stable-diffusion-webui-docker\output'
 #image_directory = 'X:\\Stable\\dif\\stable-diffusion-webui-docker\\output\\img2img\\2023-05-17\\'
-image_directory = '/output'
+image_directory = '/srv/dev-disk-by-uuid-e83913b3-e590-4dc8-9b63-ce0bdbe56ee9/Stable/dif/stable-diffusion-webui-docker/output'
 
 # Process the images in the directory and generate captions
 process_images_in_directory(image_directory)
