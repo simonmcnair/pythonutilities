@@ -1,67 +1,82 @@
 import os
-import csv
 import hashlib
-import shutil
+import csv
+import argparse
+import multiprocessing
+from tqdm import tqdm
 import zipfile
 import tarfile
 import rarfile
 import py7zr
 import msilib
 
+ARCHIVE_TYPES = {
+    '.zip': zipfile.ZipFile,
+    '.tar': tarfile.TarFile,
+    '.gz': tarfile.TarFile,
+    '.bz2': tarfile.TarFile,
+    '.xz': tarfile.TarFile,
+    '.rar': rarfile.RarFile,
+    '.7z': py7zr.SevenZipFile,
+    '.msi': msilib.OpenDatabase
+}
 
-def process_archive(file_path, log_writer):
-    archive_dir, archive_name = os.path.split(file_path)
-    archive_type = archive_name.split('.')[-1].lower()
+def compute_sha1(file_path):
+    with open(file_path, 'rb') as f:
+        content = f.read()
+    sha1 = hashlib.sha1(content).hexdigest()
+    return sha1
+
+def process_archive(archive_path, output_file):
+    archive_type = os.path.splitext(archive_path)[1].lower()
+    if archive_type not in ARCHIVE_TYPES:
+        return
+    
     try:
-        if archive_type == 'zip':
-            with zipfile.ZipFile(file_path, 'r') as zip_file:
-                for zip_info in zip_file.infolist():
-                    with zip_file.open(zip_info) as file:
-                        sha1 = hashlib.sha1(file.read()).hexdigest()
-                        log_writer.writerow([get_timestamp(), archive_dir, archive_name, zip_info.filename, os.path.basename(zip_info.filename), sha1])
-        elif archive_type == 'msi':
-            db = msilib.OpenDatabase(file_path, msilib.MSIDBOPEN_READONLY)
-            view = db.OpenView("SELECT * FROM _Streams")
-            view.Execute(None)
-            while True:
-                rec = view.Fetch()
-                if rec is None:
-                    break
-                stream_name = rec.GetString(1)
-                if stream_name.startswith("#"):
-                    continue
-                with db.OpenStream(stream_name) as file:
-                    sha1 = hashlib.sha1(file.read()).hexdigest()
-                    log_writer.writerow([get_timestamp(), archive_dir, archive_name, stream_name, os.path.basename(stream_name), sha1])
-        elif archive_type == 'tar':
-            with tarfile.open(file_path, 'r') as tar_file:
-                for tar_info in tar_file.getmembers():
-                    if tar_info.isfile():
-                        with tar_file.extractfile(tar_info) as file:
-                            sha1 = hashlib.sha1(file.read()).hexdigest()
-                            log_writer.writerow([get_timestamp(), archive_dir, archive_name, tar_info.name, os.path.basename(tar_info.name), sha1])
-        elif archive_type == 'rar':
-            with rarfile.RarFile(file_path, 'r') as rar_file:
-                for rar_info in rar_file.infolist():
-                    if rar_info.isfile():
-                        with rar_file.open(rar_info) as file:
-                            sha1 = hashlib.sha1(file.read()).hexdigest()
-                            log_writer.writerow([get_timestamp(), archive_dir, archive_name, rar_info.filename, os.path.basename(rar_info.filename), sha1])
-        elif archive_type == '7z':
-            with py7zr.SevenZipFile(file_path, mode='r') as seven_zip:
-                for file_info in seven_zip.getnames():
-                    with seven_zip.open(file_info) as file:
-                        sha1 = hashlib.sha1(file.read()).hexdigest()
-                        log_writer.writerow([get_timestamp(), archive_dir, archive_name, file_info, os.path.basename(file_info), sha1])
-        else:
-            print(f"Unsupported archive type: {archive_type}")
+        archive = ARCHIVE_TYPES[archive_type](archive_path, 'r')
     except Exception as e:
-        print(f"Error processing archive {file_path}: {e}")
-        shutil.move(file_path, os.path.join(os.path.dirname(file_path), 'badarchives', os.path.basename(file_path)))
+        print(f"Error opening archive {archive_path}: {e}")
+        return
+    
+    try:
+        for file_info in archive.infolist():
+            file_name = file_info.filename
+            if file_name.startswith('__MACOSX'):
+                continue
+            if file_info.is_dir():
+                continue
+            if not file_name:
+                continue
+            content = archive.read(file_info)
+            sha1 = hashlib.sha1(content).hexdigest()
+            output_file.writerow([archive_path, file_name, sha1])
+    except Exception as e:
+        print(f"Error processing archive {archive_path}: {e}")
+    finally:
+        archive.close()
 
+def process_directory(directory_path, output_file):
+    for root, dirs, files in os.walk(directory_path):
+        for file_name in files:
+            file_path = os.path.join(root, file_name)
+            process_archive(file_path, output_file)
 
-def process_directory(directory_path):
-    log_file_path = os.path.join(directory_path, 'checksum_log.csv')
-    with open(log_file_path, 'w', newline='') as log_file:
-        log_writer = csv.writer(log_file)
-        log_writer
+def main():
+    parser = argparse.ArgumentParser(description='Generate SHA1 checksums of files inside archives.')
+    parser.add_argument('directory', metavar='directory', type=str, help='the directory to scan for archives')
+    parser.add_argument('output_file', metavar='output_file', type=str, help='the output CSV file')
+    parser.add_argument('--num-workers', dest='num_workers', type=int, default=multiprocessing.cpu_count(), help='the number of worker processes to use (default: number of CPUs)')
+    args = parser.parse_args()
+    
+    with open(args.output_file, 'w', newline='') as f:
+        output_file = csv.writer(f)
+        output_file.writerow(['Archive Path', 'File Path', 'SHA1'])
+        
+        archives = [os.path.join(root, file_name) for root, dirs, files in os.walk(args.directory) for file_name in files if os.path.splitext(file_name)[1].lower() in ARCHIVE_TYPES]
+        
+        with multiprocessing.Pool(args.num_workers) as pool, tqdm(total=len(archives)) as progress_bar:
+            for _ in pool.imap_unordered(process_archive, [(archive_path, output_file) for archive_path in archives]):
+                progress_bar.update()
+        
+if __name__ == '__main__':
+    main()
