@@ -55,13 +55,16 @@ def process_archive(file_path, log_writer):
 def scan_directory(directory_path, log_path):
     with open(log_path, 'w', newline='') as log_file:
         log_writer = csv.writer(log_file)
-        log_writer.writerow(['Archive Path', 'Archive Name', 'File Path', 'File Name', 'Checksum'])
+        log_writer.writerow(['Timestamp', 'Archive Path', 'Archive Name', 'File Path', 'File Name', 'Checksum'])
         
-        for root, dirs, files in os.walk(directory_path):
-            for file_name in files:
-                file_path = os.path.join(root, file_name)
-                if zipfile.is_zipfile(file_path) or rarfile.is_rarfile(file_path) or file_name.endswith('.tar') or file_name.endswith('.7z') or file_name.endswith('.msi'):
-                    process_archive(file_path, log_writer)
+        for root in os.listdir(directory_path):
+            full_path = os.path.join(directory_path, root)
+            if os.path.isdir(full_path):
+                for root2, dirs, files in os.walk(full_path):
+                    for file_name in files:
+                        file_path = os.path.join(root2, file_name)
+                        if zipfile.is_zipfile(file_path) or rarfile.is_rarfile(file_path) or file_name.endswith('.tar') or file_name.endswith('.7z') or file_name.endswith('.msi'):
+                            process_archive(file_path, log_writer)
 
 # Test the program
 directory_path = '/srv/mergerfs/data/Software/sort2/ZIP/'
