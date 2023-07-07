@@ -2,74 +2,58 @@ import os
 import json
 import hashlib
 
-# define the two directories to compare
+# Define the two directories to search
 dir1 = "/srv/External_6TB_1/root/Videos/"
 dir2 = "/srv/mergerfs/data/Video2"
 
-# create a set of all filenames in both directories
-dir1_files = set([f for f in os.listdir(dir1) if os.path.isfile(os.path.join(dir1, f))])
-dir2_files = set([f for f in os.listdir(dir2) if os.path.isfile(os.path.join(dir2, f))])
-all_files = dir1_files.union(dir2_files)
+# Define the JSON file to store the hashes in
+json_file = "hashes.json"
 
-# create an array to store the directory and filename for both directory trees
-file_array = []
+# Create an empty array to store the directory and filename for each file
+file_list = []
 
-# add filenames to the file array with their respective directory
-for filename in all_files:
-    if filename in dir1_files:
-        file_array.append((dir1, filename))
-    if filename in dir2_files:
-        file_array.append((dir2, filename))
+# Recursively search through dir1 and append directory and filename to file_list
+for root, dirs, files in os.walk(dir1):
+    for file in files:
+        file_path = os.path.join(root, file)
+        print("adding " + file_path)
+        file_list.append((dir1, file_path))
 
-# sort the file array by filename
-file_array.sort(key=lambda x: x[1])
+# Recursively search through dir2 and append directory and filename to file_list
+for root, dirs, files in os.walk(dir2):
+    for file in files:
+        file_path = os.path.join(root, file)
+        print("adding " + file_path)
+        file_list.append((dir2, file_path))
 
-# read the existing hash json file or create a new one if it doesn't exist
-hash_file = "hashes.json"
-if os.path.isfile(hash_file):
-    with open(hash_file) as f:
-        hash_dict = json.load(f)
+# Sort the file list by filename
+file_list.sort(key=lambda x: x[1])
+
+# Load existing hashes from JSON file
+if os.path.isfile(json_file):
+    with open(json_file) as f:
+        hashes = json.load(f)
 else:
-    hash_dict = {}
+    hashes = {}
 
-# loop through the file array and generate a hash for each pair of identical filenames
-for i in range(len(file_array)-1):
-    if file_array[i][1] == file_array[i+1][1]:
-        file1 = os.path.join(file_array[i][0], file_array[i][1])
-        file2 = os.path.join(file_array[i+1][0], file_array[i+1][1])
-        if file1 not in hash_dict:
-            with open(file1, "rb") as f1:
-                print("generating hash for " + file1)
-                hash1 = hashlib.sha256(f1.read()).hexdigest()
-                print(hash1 + " is hash for " + file1)
-            hash_dict[file1] = hash1
-            with open(hash_file, "w") as f:
-                json.dump(hash_dict, f)
-        if file2 not in hash_dict:
-            with open(file2, "rb") as f2:
-                print("generating hash for " + file2)
-                hash2 = hashlib.sha256(f2.read()).hexdigest()
-                print(hash2 + " is hash for " + file2)
-            hash_dict[file2] = hash2
-            with open(hash_file, "w") as f:
-                json.dump(hash_dict, f)
-        if hash_dict.get(file1) == hash_dict.get(file2):
-            print(f"Duplicate: {file1}, {file2}")
+# Loop through each file in file_list and generate hash if not already present
+for directory, filename in file_list:
+    if filename not in hashes:
+        print("Creating a hash for " + filename)
+        with open(os.path.join(directory, filename), "rb") as f:
+            file_bytes = f.read()
+            file_hash = hashlib.sha256(file_bytes).hexdigest()
+            hashes[filename] = file_hash
+            print(file_hash + "is hash for", filename)
+    else:
+        print("Hash already exists for", filename)
 
-# create a list of filenames where the hash is not the same
-different_hashes = []
-for i in range(len(file_array)-1):
-    if file_array[i][1] == file_array[i+1][1]:
-        file1 = os.path.join(file_array[i][0], file_array[i][1])
-        file2 = os.path.join(file_array[i+1][0], file_array[i+1][1])
-        if file1 in hash_dict and file2 in hash_dict and hash_dict[file1] != hash_dict[file2]:
-            different_hashes.append(file_array[i][1])
+# Write updated hashes to JSON file
+with open(json_file, "w") as f:
+    json.dump(hashes, f)
 
-# print the list of filenames with different hashes
-print(f"Files with different hashes: {different_hashes}")
-
-# create a set of unique hashes
-unique_hashes = set(hash_dict.values())
-
-# print the unique hashes
-print(f"Unique hashes: {unique_hashes}")
+# Create file containing all unique hashes
+unique_hashes = set(hashes.values())
+with open("unique_hashes.txt", "w") as f:
+    for hash in unique_hashes:
+        f.write(hash + "\n")
