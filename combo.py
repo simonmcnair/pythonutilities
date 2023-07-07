@@ -38,7 +38,7 @@ cwd = os.getcwd()
 logfilepath = os.path.join(cwd, "combolog.txt")
 
 logger = setup_logger(logfilepath)
-#logger = setup_logger(logfilepath, logging.debug)
+#logger = setup_logger(logfilepath, logging.DEBUG)
 #logger.debug('This is a debug message')
 #logger.info('This is an info message')
 #logger.warning('This is a warning message')
@@ -265,45 +265,6 @@ def delete_file(file_path):
         logger.info(file_path + ".  Can only delete text files")
         return True
 
-def exiftool_get_existing_tags(img_path):
-    try:
-        existing_tags = subprocess.check_output(['exiftool', '-P', '-s', '-sep', ',', '-XMP:Subject', '-IPTC:Keywords', '-XMP:CatalogSets', '-XMP:TagsList', img_path]).decode().strip()
-        #logger.info("exiftool_get_existing_tags.  :" + tag)
-
-        tags_dict = {
-            'XMP': [],
-            'IPTC': [],
-            'CatalogSets': [],
-            'TagsList': []
-        }
-
-        separator = '\n'
-
-        if '\r\n' in existing_tags:
-            print("exiftool_get_existing_tags: rn detected. Windows?")
-            separator = '\r\n'
-
-        for tag in existing_tags.split(separator):
-
-            if tag.startswith('Subject'):
-                tags_dict['XMP'].extend(tag.split(':')[1].strip().split(','))
-            elif tag.startswith('Keywords'):
-                tags_dict['IPTC'].extend(tag.split(':')[1].strip().split(','))
-            elif tag.startswith('CatalogSets'):
-                tags_dict['CatalogSets'].extend(tag.split(':')[1].strip().split(','))
-            elif tag.startswith('TagsList'):
-                tags_dict['TagsList'].extend(tag.split(':')[1].strip().split(','))
-
-        logger.debug(img_path + ".  Exiftool output XMP        :" + str(tags_dict['XMP']))
-        logger.debug(img_path + ".  Exiftool output IPTC       :" + str(tags_dict['IPTC']))
-        logger.debug(img_path + ".  Exiftool output CatalogSets:" + str(tags_dict['CatalogSets']))
-        logger.debug(img_path + ".  Exiftool output TagsList   :" + str(tags_dict['TagsList']))
-
-        return tags_dict
-
-    except Exception as e:
-        logger.error("Exception in exiftool_get_existing_tags: " + img_path + ". Error: " + str(e))
-        return {}
     
 def exiftool_del_dupetags(path):
     logger.info("exiftool_del_dupetags: " + path + ": Removing duplicate tags")
@@ -361,6 +322,40 @@ def exiftool_make_photo_tagged(is_tagged, photo_path):
     except subprocess.CalledProcessError as e:
         logger.error("Exception " + str(e.returncode) + ".  " + str(e.output) + ".  From " + photo_path)
         return False
+
+def exiftool_get_existing_tags(img_path):
+    try:
+        existing_tags = subprocess.check_output(
+            ['exiftool', '-P', '-s', '-sep', ',', '-XMP:Subject', '-IPTC:Keywords', '-XMP:CatalogSets', '-XMP:TagsList', img_path]
+        ).decode().strip()
+
+        tags_dict = {
+            'XMP:Subject': [],
+            'IPTC:Keywords': [],
+            'XMP:CatalogSets': [],
+            'XMP:TagsList': []
+        }
+
+        separator = '\n'
+        if '\r\n' in existing_tags:
+            print("exiftool_get_existing_tags: rn detected. Windows?")
+            separator = '\r\n'
+
+        for tag in existing_tags.split(separator):
+            for tag_type in tags_dict.keys():
+                if tag.startswith(tag_type):
+                    tags_dict[tag_type].extend(tag.split(':')[1].strip().split(','))
+
+        logger.debug(img_path + ".  Exiftool output XMP:Subject      :" + str(tags_dict['XMP:Subject']))
+        logger.debug(img_path + ".  Exiftool output IPTC:Keywords    :" + str(tags_dict['IPTC:Keywords']))
+        logger.debug(img_path + ".  Exiftool output XMP:CatalogSets :" + str(tags_dict['XMP:CatalogSets']))
+        logger.debug(img_path + ".  Exiftool output XMP:TagsList    :" + str(tags_dict['XMP:TagsList']))
+
+        return tags_dict
+
+    except Exception as e:
+        logger.error("Exception in exiftool_get_existing_tags: " + img_path + ". Error: " + str(e))
+        return {}
 def exiftool_Update_tags(img_path, tags):
     try:
         cmd = ['exiftool', '-overwrite_original', '-P']
@@ -371,15 +366,18 @@ def exiftool_Update_tags(img_path, tags):
             for tag in tags:
                 tag = tag.strip()
                 if tag and tag not in existing_tags_list:
-                    logger.info("exiftool_Update_tags: need to add " + tag_type + " field " + tag + " to " + img_path)
-                    cmd.append(f'-{tag_type}:{tag_type}+={tag}')
+                    logger.debug("exiftool_Update_tags: need to add " + tag_type + " field " + tag + " to " + img_path)
+                    #cmd.append(f'-{tag_type}:{tag_type}+={tag}')
+                    cmd.append(f'-{tag_type}+={tag}')
                     updated = True
 
         if updated:
+            cmd.extend(['-' + tag_type + ':' + tag_type + '+=' + tag for tag_type in existing_tags.keys() for tag in tags])
             cmd.append(img_path)
             try:
                 ret = subprocess.run(cmd, stderr=subprocess.STDOUT, universal_newlines=True)
-                logger.info("exiftool_Update_tags " + img_path + ".  Exiftool update completed successfully.  " + str(ret))
+                logger.info("exiftool_Update_tags " + img_path + ".  Exiftool update completed successfully.")
+                logger.debug("exiftool_Update_tags " + img_path + ".  Exiftool update completed successfully.  " + str(ret))
                 return True
             except Exception as e:
                 logger.error("Exception in exiftool_Update_tags: error " + str(e))
@@ -392,6 +390,7 @@ def exiftool_Update_tags(img_path, tags):
         logger.error("Exception in exiftool_Update_tags: error " + str(e))
         return False
 
+
 def validate_tags(img_path, tags):
     try:
         existing_tags = exiftool_get_existing_tags(img_path)
@@ -402,7 +401,7 @@ def validate_tags(img_path, tags):
                 tag = tag.strip()
 
                 if tag and tag not in existing_tags_list:
-                    logger.info("validate_tags: " + img_path + "." + tag_type + " tag " + str(tag) + " is missing from " + img_path)
+                    logger.debug("validate_tags: " + img_path + "." + tag_type + " tag " + str(tag) + " is missing from " + img_path)
                     missing = True
         if missing:
             return True
@@ -412,6 +411,7 @@ def validate_tags(img_path, tags):
     except subprocess.CalledProcessError as e:
         logger.error("Exception in validate_tags: " + img_path + ". Error " + str(e.returncode) + " removing duplicate tags: " + str(e.output) + ".")
         return False
+    
 def find_duplicate_tags_in_file(img_path):
     try:
         existing_tags = exiftool_get_existing_tags(img_path)
@@ -480,27 +480,28 @@ def process_file(image_path):
     try:
         tagdict = [substr for substr in tagdict if substr]
     except Exception as e:
-        logger.error("Processfile tagdict substr Error " + ".  Well that didn't work.")
+        logger.error("Processfile tagdict substr Error .  Well that didn't work.")
+        return False
    
     try:
         cmd =  exiftool_Update_tags(image_path, tagdict)
-        logger.info("exiftool_Update_tags success. " + image_path + ".  output: " + cmd)
+        logger.info("exiftool_Update_tags success. " + image_path + ".  output: " + str(cmd))
     except Exception as e:
-        logger.error("Processfile exiftool_Update_tags Exception" + ": Error validating tags. " + ". " + image_path + ". " + str(e) )
+        logger.error("Processfile exiftool_Update_tags Exception. " + image_path + ". " + str(e) )
         return False
     
     try:
         ret = validate_tags(image_path, tagdict)
         logger.info(image_path + " tags added correctly " + str(ret))
     except Exception as e:
-        logger.error("Processfile validate_tags Exception " + ": Error validating tags. " + ". " + image_path + ". " + str(e) )
+        logger.error("Processfile validate_tags Exception " + ". " + image_path + ". " + str(e) )
         return False
         
     try:
         ret = check_and_del_text_file(output_file,gr_output_text)
         logger.info(image_path + " check_and_del success " + str(ret))
     except Exception as e:
-        logger.error("Processfile check_and_del_text_file Exception" + ": Error check_and_del_text_file. " + ". " + image_path + ". " + str(e) )
+        logger.error("Processfile check_and_del_text_file Exception. " + ". " + image_path + ". " + str(e) )
         return False
 
     try:        
@@ -508,7 +509,7 @@ def process_file(image_path):
         logger.info(image_path + " exiftool_make_photo_tagged " + " True " + " success " + str(ret))
         return True
     except Exception as e:
-        logger.error("Processfile exiftool_make_photo_tagged Exception" + ": Error making file tagged. " + ". " + image_path + ". " + str(e) )
+        logger.error("Processfile exiftool_make_photo_tagged Exception. " + ". " + image_path + ". " + str(e) )
         return False
 
 
