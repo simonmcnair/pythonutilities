@@ -483,7 +483,7 @@ def process_file(image_path):
                 deldupetags(image_path)
             return True
         else:
-            print("not marked as processed.  Continuing with " + image_path)
+            print("not marked as processed.  Continue processing " + image_path)
 
         image = Image.open(image_path)
         output_file = os.path.splitext(image_path)[0] + ".txt"
@@ -542,7 +542,8 @@ def process_images_in_directory(directory):
                 # Get the full path to the image
                 overall_image_count += 1
 
-    for root, dirs, files in os.walk(directory):
+    for root, dirs, files in sorted(os.walk(directory)):
+        dirs.sort()
         for file in files:
             # Check if the file is an image
             if file.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
@@ -550,51 +551,56 @@ def process_images_in_directory(directory):
                 image_path = os.path.join(root, file)
                 image_paths.append(image_path)
 
+    image_paths.sort()  # Sort the filepaths based on base filenames
+    #image_paths.sort(key=lambda x: os.path.basename(x))  # Sort the filepaths based on base filenames
+
     num_images = len(image_paths)
     processed_images = 0
     average_time_per_image = 0
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-#    with concurrent.futures.ThreadPoolExecutor() as executor:
+#    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = []
- 
+        completed_count = 0
+
         # Submit the image processing tasks
         for image_path in image_paths:
             future = executor.submit(process_file, image_path)
             futures.append(future)
-            
-        running_count = sum(1 for future in futures if future.running())
-        
-        print ("there are " + str(running_count) + " futures running")
-            
-        completed_count = 0
-        total_count = len(futures)
+
+        while completed_count < num_images:
+
+            running_count = sum(1 for future in futures if future.running())
+            completed_count = sum(1 for future in futures if future.done())
+            outstanding_count = num_images - completed_count
+            progress = completed_count / num_images * 100
+            folderprogress = completed_count / num_images
+
+            overall_processed_images = overall_image_count + completed_count
+            overall_progress = overall_processed_images / overall_image_count * 100
 
 
-        while completed_count < total_count:
-            # Check if any futures are completed
-            completed_count = total_count - running_count
-            for future in concurrent.futures.as_completed(futures):
-                processed_images += 1
-                overall_processed_images += 1
-                folderprogress = processed_images / num_images
-                overallfolderprogress = overall_processed_images / overall_image_count
+            print(f"Running: {running_count}, Completed: {completed_count}, Outstanding: {outstanding_count}")
+            print(f"Progress: {progress:.2f}%")
 
-                if future.done():
-                    completed_count += 1
-                    result = future.result()
-                    print(f"Image processed: {result} ({completed_count}/{total_count})")
+            log_error("#################### current folder: " + str(completed_count) + " of " + str(num_images) + " files.     " + str(progress) + '% complete')
+            #log_error("#################### overall: " + str(overall_processed_images) + " of " + str(overall_image_count) + " files.     " + str(overall_progress) + '% complete')
+
+
+    print("finished")
+
+    #            processed_images += 1
+    #            overall_processed_images += 1
+    #            overallfolderprogress = overall_processed_images / overall_image_count
+
+    #            if future.done():
+    #                completed_count += 1
+    #                result = future.result()
+    #                print(f"Image processed: {result} ({completed_count}/{total_count})")
             # Check if any futures are completed or running
-            print("#################### current folder: " + str(processed_images) + " of " + str(num_images) + " files.     " + str(folderprogress) + '% complete')
-            print("#################### overall: " + str(overall_processed_images) + " of " + str(overall_image_count) + " files.     " + str(overallfolderprogress) + '% complete')
-        eta = (num_images - processed_images) * average_time_per_image
+    #    eta = (num_images - processed_images) * average_time_per_image
         
         #for future in concurrent.futures.:
-
-
-
-
-
 
 # Specify the directory containing the images
 
