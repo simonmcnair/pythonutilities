@@ -10,6 +10,8 @@ from huggingface_hub import hf_hub_download
 from onnxruntime import InferenceSession
 import concurrent.futures
 import subprocess
+from datetime import datetime
+
 #from timer import Timer
 
 # Needs exiftool too
@@ -21,7 +23,14 @@ TEXT_EXTENSIONS = ('.txt',)
 def log_error(msg):
     print(msg)
     with open('error.log', 'a') as f:
-        f.write(msg + '\r\n')
+        f.write(str(datetime.now()) + ": " + msg + '\r\n')
+
+def get_procedure_name(func):
+    def wrapper(*args, **kwargs):
+        procedure_name = func.__name__
+        print("Procedure name:", procedure_name)
+        return func(*args, **kwargs)
+    return wrapper
 
 def update_progress(progress, eta):
     # Update progress bar and ETA
@@ -146,30 +155,40 @@ RE_SPECIAL = re.compile(r'([\\()])')
 
 def check_and_append_text_file(file_path, words):
     # Check if the file exists
-    if not os.path.isfile(file_path):
-        # If the file doesn't exist, create it and write the words
-        log_error("Creating file " + file_path)
-        with open(file_path, 'w') as file:
-            file.write(words)
-    else:
-        # Read the contents of the text file
-        with open(file_path, 'r') as file:
-            file_contents = file.read()
-
-        # Split the file contents into individual words
-        file_words = set(file_contents.strip().split(','))
-
-        # Split the input words into individual words
-        input_words = set(words.strip().split(','))
-
-        # Check if all the input words are present in the file words
-        if not input_words.issubset(file_words):
-            # Append the input words to the file
-            log_error("appending " + words + " to " + file_path)
-            with open(file_path, 'a') as file:
-                file.write(',' + words)
+    try:
+        if not os.path.isfile(file_path):
+            # If the file doesn't exist, create it and write the words
+            log_error("check_and_append_text_file: Creating file " + file_path)
+            with open(file_path, 'w') as file:
+                file.write(words)
         else:
-            log_error("All words already present in " + file_path)
+            # Read the contents of the text file
+            with open(file_path, 'r') as file:
+                file_contents = file.read()
+
+            if ',' in file_contents:
+                # Split the file contents into individual words
+                file_words = set(file_contents.strip().split(','))
+
+                # Split the input words into individual words
+                input_words = set(words.strip().split(','))
+
+                # Check if all the input words are present in the file words
+                if not input_words.issubset(file_words):
+                    # Append the input words to the file
+                    log_error("check_and_append_text_file: appending " + str(words) + " to " + file_path)
+                    with open(file_path, 'a') as file:
+                        file.write(',' + words)
+                else:
+                    log_error("check_and_append_text_file: All words already present in " + file_path)
+            else:
+                log_error("check_and_append_text_file: " + file_path + " is not a CSV file")
+                return True
+            return True
+
+    except Exception as e:
+        log_error("check_and_append_text_file: error " + str(e))
+        return False
 
 
 
@@ -197,7 +216,7 @@ def image_to_wd14_tags(image:Image.Image) \
 
         return ratings, output_text, filtered_tags
     except Exception as e:
-        log_error("error " + e)
+        log_error("error " + str(e))
 
 def build_command(img_path, tags):
     try:
@@ -209,8 +228,14 @@ def build_command(img_path, tags):
         existing_iptc_tags = []
         existing_CatalogSets_tags = []
         existing_TagsList_tags = []
+        seperator = '\n'
 
-        for tag in existing_tags.split('\r\n'):
+        if '\r\n' in existing_tags:
+            print("buildcommand: rn detected.  Windows ?")
+            seperator = '\r\n'
+            
+    
+        for tag in existing_tags.split(seperator):
             if tag.startswith('Subject'):
                 existing_xmp_tags.extend(tag.split(':')[1].strip().split(','))
             elif tag.startswith('Keywords'):
@@ -219,6 +244,16 @@ def build_command(img_path, tags):
                 existing_CatalogSets_tags.extend(tag.split(':')[1].strip().split(','))
             elif tag.startswith('TagsList'):
                 existing_TagsList_tags.extend(tag.split(':')[1].strip().split(','))
+        
+        if not existing_xmp_tags:
+            existing_xmp_tags = [substr for substr in existing_xmp_tags if substr]
+        if not existing_iptc_tags:
+            existing_iptc_tags = [substr for substr in existing_iptc_tags if substr]
+        if not existing_CatalogSets_tags:
+            existing_CatalogSets_tags = [substr for substr in existing_CatalogSets_tags if substr]
+        if not existing_TagsList_tags:
+            existing_TagsList_tags = [substr for substr in existing_TagsList_tags if substr]
+
 
       #  log_error(img_path + " Current XMP tags are " + str(existing_xmp_tags))
       #  log_error(img_path + " Current iptc tags are " + str(existing_iptc_tags))
@@ -228,21 +263,21 @@ def build_command(img_path, tags):
         for tag in tags:
             tag = tag.strip()
             if tag and tag not in existing_xmp_tags:
-                log_error("need to add xmp field " + tag + " to " + img_path)
+                log_error("buildcommand: need to add xmp field " + tag + " to " + img_path)
                 cmd.append(f'-XMP:Subject+={tag}')
                 updated = True
             if tag and tag not in existing_iptc_tags:
-                log_error("need to add iptc field " + tag + " to " + img_path)
+                log_error("buildcommand: need to add iptc field " + tag + " to " + img_path)
                 cmd.append(f'-iptc:keywords+={tag}')
                 updated = True
             if tag and tag not in existing_CatalogSets_tags:
                 # Add the tag to CatalogSets
-                print("need to add catalogset field " + tag + " to " + img_path)
+                print("buildcommand: need to add catalogset field " + tag + " to " + img_path)
                 cmd.append(f'-XMP:CatalogSets+={tag}')
                 updated = True
             if tag and tag not in existing_TagsList_tags:
                 # Add the tag to tagslist
-                print("need to add tagslist field " + tag + " to " + img_path)
+                print("buildcommand: need to add tagslist field " + tag + " to " + img_path)
                 cmd.append(f'-XMP:TagsList+={tag}')
                 updated = True
         if updated:
@@ -251,7 +286,7 @@ def build_command(img_path, tags):
         else:
             return None
     except Exception as e:
-        log_error("error " + e)
+        log_error("buildcommand: error " + str(e))
 
 
 def dupe_tags(img_path):
@@ -273,7 +308,14 @@ def dupe_tags(img_path):
         existing_TagsList_tags = []
         duplicate_tags = {}  # Dictionary to store duplicate tags and their counts
 
-        for tag in existing_tags.split('\r\n'):
+        if '\r\n' in existing_tags:
+            print("dupe_tags: rn detected")
+            seperator = '\r\n'
+        elif '\n' in existing_tags:
+            print("dupe_tags: n detected")
+            seperator = '\n'
+
+        for tag in existing_tags.split(seperator):
             if tag.startswith('Subject'):
                 existing_xmp_tags.extend(tag.split(':')[1].strip().split(','))
             elif tag.startswith('Keywords'):
@@ -283,8 +325,18 @@ def dupe_tags(img_path):
             elif tag.startswith('TagsList'):
                 existing_TagsList_tags.extend(tag.split(':')[1].strip().split(','))
 
+        if not existing_xmp_tags:
+            existing_xmp_tags = [substr for substr in existing_xmp_tags if substr]
+        if not existing_iptc_tags:
+            existing_iptc_tags = [substr for substr in existing_iptc_tags if substr]
+        if not existing_CatalogSets_tags:
+            existing_CatalogSets_tags = [substr for substr in existing_CatalogSets_tags if substr]
+        if not existing_TagsList_tags:
+            existing_TagsList_tags = [substr for substr in existing_TagsList_tags if substr]
+
+
         if "error" in existing_tags.lower():
-            log_error(img_path + ".  Error " + existing_tags)
+            log_error("dupe_tags: " + img_path + ".  Error " + existing_tags)
             return False
         
         #log_error(img_path + " Current XMP tags are " + str(existing_xmp_tags))
@@ -297,20 +349,20 @@ def dupe_tags(img_path):
         CatalogSets_count = existing_CatalogSets_tags.count(tag)
         TagsList_count = existing_TagsList_tags.count(tag)
         if xmp_count > 1 or iptc_count > 1 or CatalogSets_count > 1 or TagsList_count > 1:
-            log_error(img_path + ".  multiple tag occurance of " + tag)
+            log_error("dupe_tags: " + img_path + ".  multiple tag occurance of " + tag)
             duplicate_tags[tag] = xmp_count + iptc_count  # Store tag and its total count
             Dupes = True
 
         if Dupes:
-            log_error(img_path + ".  Duplicate tags.")
+            log_error("dupe_tags: " + img_path + ".  Duplicate tags.")
             for tag, count in duplicate_tags.items():
-                log_error(f"{tag}: {count} times")  # Print tag and its count
+                log_error(f"dupetags: {tag}: {count} times")  # Print tag and its count
             return True
         else:
-            log_error(img_path + ".  No Duplicate tags.")
+            log_error("dupe_tags: " + img_path + ".  No Duplicate tags.")
             return False
     except subprocess.CalledProcessError as e:
-        log_error(img_path + ".  Error " + str(e.returncode) + " removing duplicate tags:" + e.output + ".")
+        log_error("dupe_tags: " + img_path + ".  Error " + str(e.returncode) + " removing duplicate tags:" + str(e.output) + ".")
         return False
 
 def validate_tags(img_path, tags):
@@ -322,12 +374,13 @@ def validate_tags(img_path, tags):
         #return_code = result.returncode
         Dupes = False
         
-        existing_tags = subprocess.check_output(['exiftool', '-P' , '-s', '-sep', ',', '-XMP:Subject', '-IPTC:Keywords', img_path]).decode().strip()
+        #existing_tags = subprocess.check_output(['exiftool', '-P' , '-s', '-sep', ',', '-XMP:Subject', '-IPTC:Keywords', img_path]).decode().strip()
+        existing_tags = subprocess.check_output(['exiftool', '-P' , '-s', '-sep', ',', '-XMP:Subject', '-IPTC:Keywords', '-XMP:CatalogSets', '-XMP:TagsList', img_path]).decode().strip()
 
         #exiftool -XMP:Subject-=''
 
         if "error" in existing_tags.lower():
-            log_error(img_path + ".  Error " + existing_tags)
+            log_error("validate_tags: " + img_path + ".  Error " + existing_tags)
             return False
 
         existing_xmp_tags = []
@@ -336,7 +389,14 @@ def validate_tags(img_path, tags):
         existing_TagsList_tags = []
         duplicate_tags = {}  # Dictionary to store duplicate tags and their counts
 
-        for tag in existing_tags.split('\r\n'):
+        if '\r\n' in existing_tags:
+            print("validate_tags: " + "rn detected")
+            seperator = '\r\n'
+        elif '\n' in existing_tags:
+            print("validate_tags: " + "n detected")
+            seperator = '\n'
+
+        for tag in existing_tags.split(seperator):
             if tag.startswith('Subject'):
                 existing_xmp_tags.extend(tag.split(':')[1].strip().split(','))
             elif tag.startswith('Keywords'):
@@ -346,80 +406,111 @@ def validate_tags(img_path, tags):
             elif tag.startswith('TagsList'):
                 existing_TagsList_tags.extend(tag.split(':')[1].strip().split(','))
 
+        if not existing_xmp_tags:
+            existing_xmp_tags = [substr for substr in existing_xmp_tags if substr]
+        if not existing_iptc_tags:
+            existing_iptc_tags = [substr for substr in existing_iptc_tags if substr]
+        if not existing_CatalogSets_tags:
+            existing_CatalogSets_tags = [substr for substr in existing_CatalogSets_tags if substr]
+        if not existing_TagsList_tags:
+            existing_TagsList_tags = [substr for substr in existing_TagsList_tags if substr]
+
+        missing = False
         for tag in tags:
             tag = tag.strip()
+
             if tag and tag not in existing_xmp_tags and tag not in existing_iptc_tags and tag not in existing_CatalogSets_tags and tag not in existing_TagsList_tags:
-                log_error(img_path + ".  tag " + " is missing from " + img_path)
-                return False
+                if tag not in existing_xmp_tags:
+                    log_error("validate_tags: " + img_path + ".existing_xmp_tags  tag " + str(tag) + " is missing from " + img_path)
+                if tag not in existing_iptc_tags:
+                    log_error("validate_tags: " + img_path + ".existing_iptc_tags  tag " + str(tag) + " is missing from " + img_path)
+                if tag not in existing_CatalogSets_tags:
+                    log_error("validate_tags: " + img_path + ".existing_CatalogSets_tags  tag " + str(tag) + " is missing from " + img_path)
+                if tag not in existing_TagsList_tags:
+                    log_error("validate_tags: " + img_path + ".existing_TagsList_tags tag " + str(tag) + " is missing from " + img_path)
+                missing = True
+
             elif tag:
                 xmp_count = existing_xmp_tags.count(tag)
                 iptc_count = existing_iptc_tags.count(tag)
                 CatalogSets_count = existing_CatalogSets_tags.count(tag)
                 TagsList_count = existing_TagsList_tags.count(tag)
                 if xmp_count > 1 or iptc_count > 1 or CatalogSets_count > 1 or TagsList_count > 1:
-                    log_error(img_path + ".  multiple tag occurance of " + tag)
+                    log_error("validate_tags: " + img_path + ".  multiple tag occurance of " + tag)
                     duplicate_tags[tag] = xmp_count + iptc_count + CatalogSets_count + TagsList_count # Store tag and its total count
                     Dupes = True
 
         if Dupes:
-            log_error(img_path + ".  Duplicate tags.  Try to remove them")
+            log_error("validate_tags: " + img_path + ".  Duplicate tags.  Try to remove them")
             for tag, count in duplicate_tags.items():
                 log_error(f"{tag}: {count} times")  # Print tag and its count
             deldupetags(img_path)
 
+        if missing == True:
+            return False
         return True
     except subprocess.CalledProcessError as e:
-        log_error(img_path + ".  Error " + str(e.returncode) + " removing duplicate tags:" + e.output + ".")
+        log_error("validate_tags: " + img_path + ".  Error " + str(e.returncode) + " removing duplicate tags:" + str(e.output) + ".")
         return False
 
 def deldupetags(path):
     try:
-        log_error(path + ": Removing duplicate tags")
+        log_error("deldupetags: " + path + ": Removing duplicate tags")
         output_xmp = subprocess.check_output(['exiftool', '-overwrite_original' ,'-P', '-m', '-sep', '##', '-XMP:Subject<${XMP:Subject;NoDups}', path], stderr=subprocess.STDOUT, universal_newlines=True)
         output_iptc = subprocess.check_output(['exiftool', '-overwrite_original', '-P', '-m', '-sep', '##', '-iptc:keywords<${iptc:keywords;NoDups}', path], stderr=subprocess.STDOUT, universal_newlines=True)
         output_CatalogSets = subprocess.check_output(['exiftool', '-overwrite_original' ,'-P', '-m', '-sep', '##', '-XMP:CatalogSets<${XMP:CatalogSets;NoDups}', path], stderr=subprocess.STDOUT, universal_newlines=True)
         output_TagsList = subprocess.check_output(['exiftool', '-overwrite_original', '-P', '-m', '-sep', '##', '-iptc:TagsList<${iptc:TagsList;NoDups}', path], stderr=subprocess.STDOUT, universal_newlines=True)
-        log_error("Duplicate tags removed successfully." + path)
-        log_error(path + ": XMP output was " + output_xmp)
-        log_error(path + ": iptc output was " + output_iptc)
-        log_error(path + ": CatalogSets output was " + output_CatalogSets)
-        log_error(path + ": TagsList output was " + output_TagsList)
+        log_error("deldupetags: " + "Duplicate tags removed successfully." + path)
+        log_error("deldupetags: " + path + ": XMP output was " + output_xmp)
+        log_error("deldupetags: " + path + ": iptc output was " + output_iptc)
+        log_error("deldupetags: " + path + ": CatalogSets output was " + output_CatalogSets)
+        log_error("deldupetags: " + path + ": TagsList output was " + output_TagsList)
         return True
     except subprocess.CalledProcessError as e:
-        log_error("Error for " + path + ". Retcode: " + e.returncode + " removing duplicate tags:" + e.output + ".")
+        log_error("deldupetags: " + "Error for " + path + ". Retcode: " + str(e.returncode) + " removing duplicate tags:" + str(e.output) + ".")
         return False
     
 
 
 def check_and_del_text_file(file_path, words):
     # Check if the file exists
-    if not os.path.isfile(file_path):
-        # If the file doesn't exist, create it and write the words
-        log_error("No text metadata file exists.  Great.  Awesome.  Super.  Smashing.")
-        return True
-    else:
-        # Read the contents of the text file
-        with open(file_path, 'r') as file:
-            file_contents = file.read()
-
-        # Split the file contents into individual words
-        file_words = set(file_contents.strip().split(','))
-
-        # Split the input words into individual words
-        input_words = set(words.strip().split(','))
-
-        # Check if all the input words are present in the file words
-        if not input_words.issubset(file_words):
-            # Append the input words to the file
-            log_error("these words:  " + words + "  exist in text file but not image file. " + file_path)
-            return False
-            
-        else:
-            log_error("Words required and present are : " + words)
-            log_error("All words already present in " + file_path + " Delete the file")
-            delete_file(file_path)
+    try:
+        if not os.path.isfile(file_path):
+            # If the file doesn't exist, create it and write the words
+            log_error("check_and_del_text_file: " + "No text metadata file exists.  Great.  Awesome.  Super.  Smashing.")
             return True
+        else:
+            # Read the contents of the text file
+            log_error("check_and_del_text_file: " + file_path + " exists.  Checking for text")
+            with open(file_path, 'r') as file:
+                file_contents = file.read()
 
+            if "," in file_contents:
+            # Split the file contents into individual words
+                file_words = set(file_contents.strip().split(','))
+                
+                # Split the input words into individual words
+                input_words = set(words.strip().split(','))
+                log_error(file_path + "Words detected from ML are " + words)
+                log_error(file_path + "Words detected from TXT are " + file_contents)
+                
+                # Check if all the input words are present in the file words
+                if not input_words.issubset(file_words):
+                    # Append the input words to the file
+                    log_error("check_and_del_text_file: " + "these words:  " + str(words) + "  exist in text file but not image file. " + file_path)
+                    return False    
+                else:
+                    log_error("check_and_del_text_file: " + "Words required and present are : " + words)
+                    log_error("check_and_del_text_file: " + "All words already present in " + file_path + " Delete the file")
+                    delete_file(file_path)
+                    return True
+            else:
+                log_error("check_and_del_text_file: " + file_path + " is not a csv file.  Skipping")
+                return True
+    except subprocess.CalledProcessError as e:
+        log_error("check_and_del_text_file: " + "Error for " + file_path + ". Retcode: " + str(e.returncode) + " check and del text file:" + str(e.output) + ".")
+        return False
+ 
 def is_photo_tagged(photo_path):
     try:
         output = subprocess.check_output(['exiftool', '-P', '-s', '-XMP-acdsee:tagged', photo_path]).decode().strip()
@@ -431,7 +522,7 @@ def is_photo_tagged(photo_path):
             #log_error(photo_path + " untagged.")
             return False
     except subprocess.CalledProcessError as e:
-        log_error("Error " + e.returncode + ".  " + e.output + ".")
+        log_error("is_photo_tagged: "+ "Error " + str(e.returncode) + ".  " + str(e.output) + ".")
         return False
 
 def make_photo_tagged(photo_path):
@@ -444,8 +535,9 @@ def make_photo_tagged(photo_path):
             return False
         else:
             log_error(photo_path + " is already tagged.  Not modifying")
+            return True
     except subprocess.CalledProcessError as e:
-        log_error("Error " + e.returncode + ".  " + e.output + ".  From " + photo_path)
+        log_error("Error " + str(e.returncode) + ".  " + str(e.output) + ".  From " + photo_path)
         return False
 
 def make_photo_untagged(photo_path):
@@ -456,7 +548,7 @@ def make_photo_untagged(photo_path):
             return True
         return False
     except subprocess.CalledProcessError as e:
-        log_error("Error " + e.returncode + ".  " + e.output + ".  From " + photo_path)
+        log_error("Error " + str(e.returncode) + ".  " + str(e.output) + ".  From " + photo_path)
         return False
 
 def delete_file(file_path):
@@ -471,78 +563,93 @@ def delete_file(file_path):
             return False
     else:
         log_error("can only delete text files")
+        return True
 
 def process_file(image_path):
     #image_path = 'C:\\Users\\Simon\\Downloads\\w6bgPUV.png'
     reprocess = False
     try:
-        log_error("Processing " + image_path)
+        log_error("Processfile " + " Processing " + image_path)
+        output_file = os.path.splitext(image_path)[0] + ".txt"
+
         if is_photo_tagged(image_path) and not reprocess:
             log_error(image_path + " is already tagged")
             if dupe_tags(image_path) :
                 deldupetags(image_path)
-            return True
+            if  os.path.isfile(output_file):
+                log_error(image_path + ".  Need to process as there is a " + output_file + " file which could be deleted.")
+            else:
+                log_error(image_path + ".  All tags are correct and no dupe tags.  Skipping")
+                return True
         else:
-            print("not marked as processed.  Continue processing " + image_path)
+            log_error("Processfile " + image_path + " not marked as processed.  Continue processing ")
 
-        image = Image.open(image_path)
-        output_file = os.path.splitext(image_path)[0] + ".txt"
+        try:
+            image = Image.open(image_path)
+        except Exception as e:
+            log_error("Processfile Exception1: " + " failed to open image : " + image_path + ". Error: " + str(e) + ". output from command: " + str(ret) + ".  Skipping")
+            return False
 
-        gr_ratings, gr_output_text, gr_tags = image_to_wd14_tags(image)
+        try:
+            gr_ratings, gr_output_text, gr_tags = image_to_wd14_tags(image)
+            #gr_output_text = gr_output_text + ',tagged'
+            tagdict = gr_output_text.split(",")
+        except Exception as e:
+            log_error("Processfile substr" + "Well that didn't work.  Skipping")
+            return false
 
-        #gr_output_text = gr_output_text + ',tagged'
-        tagdict = gr_output_text.split(",")
-        log_error("caption: " + gr_output_text)
+        
+        try:
+            tagdict = [substr for substr in tagdict if substr]
+        except Exception as e:
+            log_error("Processfile substr" + "Well that didn't work.")
+
+        log_error("Processfile " + image_path + ".  caption: " + gr_output_text)
 
         #Here we have the caption, now we need to read the captions on the files, see if they match, and if not, add any relevant tags to the image file
         cmd = build_command(image_path, tagdict)
         if cmd:
-            log_error("tags need updating")
+            log_error("Processfile " + image_path + ".  Tags need updating")
             #log_error(str(cmd))
             try:
                 ret = subprocess.run(cmd, stderr=subprocess.STDOUT, universal_newlines=True)
-                print("Exiftool update completed without error")
+                print("Processfile " + image_path + ".  Exiftool update completed without error.  " + str(ret))
                 #if ret.returncode == 0 :
                 #    log_error("Exiftool completed successfully: " + str(ret.returncode))
             except Exception as e:
-                log_error("Error updating tags for : " + image_path + ". Error: " + str(e) + ". output from command: " + (ret) + ". command line was: " + (str(cmd)))
+                log_error("Processfile Exception1: " + " Error updating tags for : " + image_path + ". Error: " + str(e) + ". output from command: " + str(ret) + ". command line was: " + (str(cmd)))
                 return False
             try:
                 if validate_tags(image_path, tagdict):
-                    log_error("tags added correctly")
+                    log_error(image_path + " tags added correctly")
                     check_and_del_text_file(output_file,gr_output_text)
                     make_photo_tagged(image_path)
+                    return True
                 else:
-                    log_error(f"Error: Tags were not added correctly for {image_path}")
+                    log_error(f"Processfile Error: Tags were not added correctly for {image_path}")
                     return False
             except Exception as e:
-                log_error("Error validating tags: " + ". " + image_path + ". " + str(e) )
+                log_error("Processfile Exception2" + ": Error validating tags: " + ". " + image_path + ". " + str(e) )
                 return False
 
         else:
-            log_error("Tags are already correct.  Nothing to do.  AWESOME !")
+            log_error("Processfile " + image_path + ".  Tags are already correct.  Nothing to do.  AWESOME !")
             check_and_del_text_file(output_file,gr_output_text)
             make_photo_tagged(image_path)
             return True
     except Exception as e:
-        log_error("error " + e)
+        log_error("Processfile error3.  Exception: " + image_path + " " + str(e))
         return False
 
 
 def process_images_in_directory(directory):
     # Process each image in the directory
     image_paths = []
-    overall_image_count = 0
     overall_processed_images = 0
+    log_error("Starting")
 
+    log_error("fetching file list.  This could take a while.")
     for root, dirs, files in os.walk(directory):
-        for file in files:
-            # Check if the file is an image
-            if file.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
-                # Get the full path to the image
-                overall_image_count += 1
-
-    for root, dirs, files in sorted(os.walk(directory)):
         dirs.sort()
         for file in files:
             # Check if the file is an image
@@ -550,11 +657,14 @@ def process_images_in_directory(directory):
                 # Get the full path to the image
                 image_path = os.path.join(root, file)
                 image_paths.append(image_path)
+                print("Adding " + image_path)
+    log_error("Done.Array created")
 
     image_paths.sort()  # Sort the filepaths based on base filenames
     #image_paths.sort(key=lambda x: os.path.basename(x))  # Sort the filepaths based on base filenames
 
     num_images = len(image_paths)
+    log_error("number of images to process is " + str(num_images))
     processed_images = 0
     average_time_per_image = 0
 
@@ -576,22 +686,19 @@ def process_images_in_directory(directory):
             progress = completed_count / num_images * 100
             folderprogress = completed_count / num_images
 
-            overall_processed_images = overall_image_count + completed_count
-            overall_progress = overall_processed_images / overall_image_count * 100
+            overall_processed_images = num_images + completed_count
+            overall_progress = overall_processed_images / num_images * 100
 
 
-            print(f"Running: {running_count}, Completed: {completed_count}, Outstanding: {outstanding_count}")
-            print(f"Progress: {progress:.2f}%")
-
-            log_error("#################### current folder: " + str(completed_count) + " of " + str(num_images) + " files.     " + str(progress) + '% complete')
-            #log_error("#################### overall: " + str(overall_processed_images) + " of " + str(overall_image_count) + " files.     " + str(overall_progress) + '% complete')
+            print(f"#################### current folder: {completed_count} of {num_images} files.     {progress:.2f} % complete.  Running: {running_count}, Outstanding: {outstanding_count}")
+            #log_error("#################### overall: " + str(overall_processed_images) + " of " + str(num_images) + " files.     " + str(overall_progress) + '% complete')
 
 
-    print("finished")
+    log_error("finished")
 
     #            processed_images += 1
     #            overall_processed_images += 1
-    #            overallfolderprogress = overall_processed_images / overall_image_count
+    #            overallfolderprogress = overall_processed_images / num_images
 
     #            if future.done():
     #                completed_count += 1
@@ -611,7 +718,7 @@ def execute_script(directory=None):
     if directory is None:
         if os.name == 'nt':  # Windows
             #directory = r'X:\\Stable\\dif\\stable-diffusion-webui-docker\\output'
-            directory = r'Z:\\Pron\\Pics\\Sets\\M_Q^uis'
+            directory = r'Z:\\Pron\\Pics\\Sets'
         else:  # Linux or macOS
             directory = '/srv/dev-disk-by-uuid-e83913b3-e590-4dc8-9b63-ce0bdbe56ee9/Stable/dif/stable-diffusion-webui-docker/output'
 
@@ -633,7 +740,3 @@ if __name__ == "__main__":
     else:
         # Use the predefined directory if no command line argument is provided
         execute_script()
-
-
-
- 
