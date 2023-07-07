@@ -53,12 +53,21 @@ def get_file_hashes(dir_path):
                 print(f'Read speed: {read_speed:.2f} bytes/second')
                 print(f'Processing time: {processing_time:.2f} seconds')
 
-
-
-
             file_hashes[file_path] = hasher.hexdigest()
 
     return file_hashes
+
+def load_cache(cache_file):
+    """Load existing cache data from the cache file."""
+    cache_data = {}
+    if os.path.exists(cache_file):
+        with open(cache_file, "r", newline="") as f:
+            reader = csv.reader(f)
+            next(reader)  # Skip header row
+            for row in reader:
+                file_path, file_hash = row
+                cache_data[file_path] = file_hash
+    return cache_data
 
 def update_cache(cache_file, file_hashes):
     """
@@ -104,6 +113,9 @@ def main(dir1, dir2, cache_file, unique_hashes_file, duplicate_hashes_file):
         unique_hashes_file (str): Path to the CSV file for storing unique hashes.
         duplicate_hashes_file (str): Path to the CSV file for storing duplicate hashes.
     """
+
+    existing_cache = load_cache(cache_file)
+
     # Step 1: Get file hashes for dir1
     file_hashes_dir1 = get_file_hashes(dir1)
 
