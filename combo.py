@@ -21,52 +21,74 @@ from collections import Counter
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.tif', '.tiff', '.bmp')
 TEXT_EXTENSIONS = ('.txt',)
 
+import logging
+import os
+
+class TruncatedFileHandler(logging.FileHandler):
+    def __init__(self, filename, mode='a', encoding=None, delay=False):
+        super().__init__(filename, mode, encoding, delay)
+        self.max_file_size = 200 * 1024 * 1024  # 200MB
+        self.current_sequence = 0
+
+    def emit(self, record):
+        super().emit(record)
+        if self.should_truncate():
+            self.truncate_file()
+            self.current_sequence += 1
+            self.baseFilename = self.get_new_filename()
+
+    def should_truncate(self):
+        if os.path.isfile(self.baseFilename):
+            return os.path.getsize(self.baseFilename) > self.max_file_size
+        return False
+
+    def truncate_file(self):
+        with open(self.baseFilename, 'r+') as file:
+            file.seek(self.max_file_size)
+            file.truncate()
+
+    def get_new_filename(self):
+        base_name, ext = os.path.splitext(self.baseFilename)
+        sequence_suffix = f'{self.current_sequence:03d}'
+        return f'{base_name}_{sequence_suffix}{ext}'
 
 def setup_logger(log_file_path, log_level=logging.INFO):
-
     # Create logger
     logger = logging.getLogger('my_logger')
     logger.setLevel(logging.DEBUG)
 
     # Create file handlers for different levels
-    File_handler   = logging.FileHandler('debug.log')
-    console_handler = logging.StreamHandler()
+    log_file_base = os.path.splitext(log_file_path)[0]
     
-    ######change level here
-    File_handler.setLevel(logging.DEBUG)
-    console_handler.setLevel(logging.INFO)
-
-    info_handler = logging.FileHandler('info.log')
+    #file_handler = TruncatedFileHandler(log_file_path)
+    debug_handler = TruncatedFileHandler(log_file_base + '_debug.log')
+    info_handler = TruncatedFileHandler(log_file_base + '_info.log')
+    warning_handler = TruncatedFileHandler(log_file_base + '_warning.log')
+    error_handler = TruncatedFileHandler(log_file_base + '_error.log')
+    
+    # Set log levels
+    #file_handler.setLevel(logging.DEBUG)
+    debug_handler.setLevel(logging.DEBUG)
     info_handler.setLevel(logging.INFO)
-
-    warning_handler = logging.FileHandler('warning.log')
     warning_handler.setLevel(logging.WARNING)
-
-    error_handler = logging.FileHandler('error.log')
     error_handler.setLevel(logging.ERROR)
-    
+
     # Create formatter and add it to the handlers
     formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-    File_handler.setFormatter(formatter)
+    #file_handler.setFormatter(formatter)
+    debug_handler.setFormatter(formatter)
     info_handler.setFormatter(formatter)
     warning_handler.setFormatter(formatter)
     error_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
 
     # Add the handlers to the logger
-    logger.addHandler(File_handler)
+    #logger.addHandler(file_handler)
+    logger.addHandler(debug_handler)
     logger.addHandler(info_handler)
     logger.addHandler(warning_handler)
     logger.addHandler(error_handler)
-    logger.addHandler(console_handler)
+
     return logger
-
-
-    # Start logging
-    #logger.debug('This is a debug message')
-    #logger.info('This is an info message')
-    #logger.warning('This is a warning message')
-    #logger.error('This is an error message')
 
 # Example usage:
 cwd = os.getcwd()
@@ -381,7 +403,7 @@ def exiftool_get_existing_tags(img_path):
             'XMP:TagsList': []
         }
 
-        logger.debug(img_path + ".  exiftool_get_existing_tags exif output: \n" + existing_tags)
+        logger.debug(img_path + ": exiftool_get_existing_tags exif output: \n" + existing_tags)
         separator = '\n'
         
         if '\r\n' in existing_tags:
@@ -389,18 +411,19 @@ def exiftool_get_existing_tags(img_path):
             separator = '\r\n'
 
         for tag in existing_tags.split(separator):
+            logger.debug(img_path + ": exiftool_get_existing_tags : tag=" + tag)
             for tag_type in tags_dict.keys():
                 new = tag_type.split(':')[1]
-                logger.debug("exiftool_get_existing_tags looking for " + new)
+                logger.debug(img_path + ": exiftool_get_existing_tags looking for " + new)
                 if tag.startswith(new):
                     tag_value = tag.split(':', 1)[1].strip()  # Split using the first colon only
                     #tags_dict[tag_type].extend(tag_value.split(','))
                     tags_dict[tag_type].extend([tag.strip() for tag in tag_value.split(',')])
 
-        logger.debug(img_path + ".  exiftool_get_existing_tags Exiftool output XMP:Subject      :" + str(tags_dict['XMP:Subject']))
-        logger.debug(img_path + ".  exiftool_get_existing_tags Exiftool output IPTC:Keywords    :" + str(tags_dict['IPTC:Keywords']))
-        logger.debug(img_path + ".  exiftool_get_existing_tags Exiftool output XMP:CatalogSets :" + str(tags_dict['XMP:CatalogSets']))
-        logger.debug(img_path + ".  exiftool_get_existing_tags Exiftool output XMP:TagsList    :" + str(tags_dict['XMP:TagsList']))
+        logger.debug(img_path + ". exiftool_get_existing_tags Exiftool output XMP:Subject      :" + str(tags_dict['XMP:Subject']))
+        logger.debug(img_path + ". exiftool_get_existing_tags Exiftool output IPTC:Keywords    :" + str(tags_dict['IPTC:Keywords']))
+        logger.debug(img_path + ". exiftool_get_existing_tags Exiftool output XMP:CatalogSets :" + str(tags_dict['XMP:CatalogSets']))
+        logger.debug(img_path + ". exiftool_get_existing_tags Exiftool output XMP:TagsList    :" + str(tags_dict['XMP:TagsList']))
 
         return tags_dict
 
@@ -500,7 +523,9 @@ def find_duplicate_tags_in_file(img_path):
         duplicate_tags = {}
 
         for tag_type, existing_tags_list in existing_tags.items():
+            logger.debug(img_path + " find_duplicate_tags_in_file tag_type:" + tag_type + " .  existing_tags_list:" + str(existing_tags_list))
             for tag in existing_tags_list:
+                logger.debug(img_path + " find_duplicate_tags_in_file tag:" + tag_type + ":" + tag)
                 if tag and existing_tags_list.count(tag) > 1:
                     if tag not in duplicate_tags:
                         duplicate_tags[tag] = {
@@ -522,7 +547,7 @@ def find_duplicate_tags_in_file(img_path):
             return False
 
     except Exception as e:
-        print("find_duplicate_tags_in_file Exception:" + str(e))
+        logging.error("find_duplicate_tags_in_file Exception:" + str(e))
 
 
 def process_file(image_path):
