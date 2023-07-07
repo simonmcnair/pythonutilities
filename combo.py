@@ -337,33 +337,20 @@ def delete_file(file_path):
 def exiftool_del_dupetags(path):
     logger.info("exiftool_del_dupetags: " + path + ": Removing duplicate tags")
     try:
-        output_xmp = subprocess.check_output(['exiftool', '-overwrite_original' ,'-P', '-m', '-sep', '''##''', '''-XMP:Subject<${XMP:Subject;NoDups(1)}''', path], stderr=subprocess.STDOUT, universal_newlines=True)
-        logger.info("exiftool_del_dupetags MODIFY success XMP: " + path + ". output: " + output_xmp)
-    except Exception as e:
-        logger.error("Exception in exiftool_del_dupetags XMP: " + path + ". Error: " + str(e))
-        return False
-
-    try:
-        output_iptc = subprocess.check_output(['exiftool', '-overwrite_original', '-P', '-m', '-sep', '''##''', '''-IPTC:Keywords<${IPTC:Keywords;NoDups(1)}''', path], stderr=subprocess.STDOUT, universal_newlines=True)
-        logger.info("exiftool_del_dupetags MODIFY success IPTC: " + path + ". output: " + output_iptc)
+        output = subprocess.check_output(['exiftool', \
+                                              '-overwrite_original' ,\
+                                              '-P',\
+                                              '-m', \
+                                              '-sep', \
+                                              '''##''', \
+                                              '''-XMP:Subject<${XMP:Subject;NoDups(1)}''', \
+                                              '''-IPTC:Keywords<${IPTC:Keywords;NoDups(1)}''', \
+                                              '''-XMP:CatalogSets<${XMP:CatalogSets;NoDups(1)}''', \
+                                              '''-XMP:TagsList<${XMP:TagsList;NoDups(1)}''',path],stderr=subprocess.STDOUT, universal_newlines=True)
+        logger.info("exiftool_del_dupetags MODIFY success IPTC: " + path + ". output: " + output)
     except Exception as e:
         logger.error("Exception in exiftool_del_dupetags IPTC: " + path + ". Error: " + str(e))
         return False
-
-    try:
-        output_CatalogSets = subprocess.check_output(['exiftool', '-overwrite_original' ,'-P', '-m', '-sep', '''##''', '''-XMP:CatalogSets<${XMP:CatalogSets;NoDups(1)}''', path], stderr=subprocess.STDOUT, universal_newlines=True)
-        logger.info("exiftool_del_dupetags MODIFY success CatalogSets: " + path + ". output: " + output_CatalogSets)
-    except Exception as e:
-        logger.error("Exception in exiftool_del_dupetags CatalogSets: " + path + ". Error: " + str(e))
-        return False
-
-    try:
-        output_TagsList = subprocess.check_output(['exiftool', '-overwrite_original', '-P', '-m', '-sep', '''##''', '''-XMP:TagsList<${XMP:TagsList;NoDups(1)}''', path], stderr=subprocess.STDOUT, universal_newlines=True)
-        logger.info("exiftool_del_dupetags MODIFY success Tagslist: " + path + ". output: " + output_TagsList)
-    except Exception as e:
-        logger.error("Exception in exiftool_del_dupetags TagsList: " + path + ". Error: " +  str(e))
-        return False
-
     return True
 
 def exiftool_copy_XMPSubject_to_TagsList(path):
