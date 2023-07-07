@@ -5,155 +5,152 @@ import time
 
 HASH_CHUNK_SIZE_MB = 64  # Chunk size in MB for hashing
 
-def get_file_hashes(dir_path):
-    """
-    Generate file hashes using Blake2b algorithm for all files in a directory and its subdirectories.
+def write_unique_hashes_to_csv(unique_hashes,outputfile):
+    # Create a CSV file to write unique hashes and filepaths
+    with open(outputfile, 'w') as csvfile:
+        writer = csv.writer(csvfile)
+        # Write header row
+        writer.writerow(['Hash', 'Filepath'])
+        # Write unique hashes and filepaths
+        for hash, filepath in unique_hashes.items():
+            writer.writerow([hash, filepath])
 
-    Args:
-        dir_path (str): Directory path.
 
-    Returns:
-        dict: Dictionary containing file paths as keys and their corresponding hashes as values.
-    """
-    file_hashes = {}
+# Directories to scan
+#dir1 = "/srv/External_6TB_1/root/Videos/"
+#dir2 = "/srv/mergerfs/data/Video2/"
+
+dir1 = "W:\\External_6TB_1\\root\\Videos"
+dir2 = "W:\\mergerfs\\data\Video2\\"
+
+# Filepath for cache.csv
+cache_file = 'cache.csv'
+#cache_file = 'W:\RAID5\dev-disk-by-uuid-342ac512-ae09-47a7-842f-d3158537d395\mnt\cache.csv'
+unique_file = 'unique.csv'
+duplicate_file = 'duplicate_hashes.csv'
+
+# Dictionary to store filepaths to be processed
+toprocess = {}
+
+# Read cache.csv into filehashes dictionary if it exists
+filehashes = {}
+if os.path.exists(cache_file):
+    print("Loading cache")
+    with open(cache_file, 'r') as csvfile:
+        reader = csv.reader(csvfile)
+        for row in reader:
+            filehashes[row[0]] = row[1]
+    print("cache load complete")
+
+# Function to calculate the blake2 hash of a file
+def calculate_hash(file_path):
+
     chunk_size = HASH_CHUNK_SIZE_MB * 1024 * 1024  # Convert to bytes
     
-    for dirpath, _, filenames in os.walk(dir_path):
+    file_size = os.path.getsize(file_path)
+    file_size_MB = file_size / (1024 * 1024)
+    start_time = time.time()
+    print(f"Creating hash for file: {file_path}")
+    hasher = hashlib.blake2b()
+    read_speed = 0.0 # Initialize read speed to 0 bytes/second
+    processed_bytes = 0 # Initialize processed bytes to 0
+    with open(file_path, 'rb') as file:
+        while True:
+            chunk = file.read(chunk_size)
+            if not chunk:
+                break
+            hasher.update(chunk)
+
+
+            processed_bytes += len(chunk)
+            elapsed_time = time.time() - start_time # Elapsed time since start
+            if elapsed_time > 0:
+                    # Update read speed based on processed bytes and elapsed time
+                    read_speed = (processed_bytes / elapsed_time) / (1024 * 1024)
+            percentage_processed = (processed_bytes / file_size) * 100
+            processed_bytes_MB = processed_bytes / (1024 * 1024)
+                # Print read speed for each chunk
+            #print(f'Read speed: {read_speed:.2f} bytes/second')
+            print(f'Percentage processed: {percentage_processed:.2f}%.  Read speed: {read_speed:.2f} MBps.  Size: {file_size_MB:.2f} MB.  Processed: {processed_bytes_MB} MB')
+            
+        end_time = time.time() # End time
+        processing_time = end_time - start_time # Calculate processing time
+        
+        # Print final read speed and processing time
+        print(f'Read speed: {read_speed:.2f} bytes/second.  Processing time: {processing_time:.2f} seconds')
+        print(f'hash: {hasher.hexdigest()}')
+
+    return hasher.hexdigest()
+
+# Function to process files in a directory recursively
+def process_directory(directory):
+    i = 0
+    for dirpath, dirnames, filenames in os.walk(directory):
         for filename in filenames:
-            file_path = os.path.join(dirpath, filename)
-            file_size = os.path.getsize(file_path)
-            start_time = time.time()
-            print(f"Processing file: {file_path}")
-            hasher = hashlib.blake2b()
-            read_speed = 0.0 # Initialize read speed to 0 bytes/second
-            processed_bytes = 0 # Initialize processed bytes to 0
-            with open(file_path, 'rb') as file:
-                while True:
-                    chunk = file.read(chunk_size)
-                    if not chunk:
-                        break
-                    hasher.update(chunk)
+            i += 1
+            filepath = os.path.join(dirpath, filename)
+            toprocess[filepath] = True
+    print(str(directory) + " has " + str(i) + " files.")
 
+# Process both directories
+print("Loading files")
+process_directory(dir1)
+process_directory(dir2)
 
-                    processed_bytes += len(chunk)
-                    elapsed_time = time.time() - start_time # Elapsed time since start
-                    if elapsed_time > 0:
-                            # Update read speed based on processed bytes and elapsed time
-                            read_speed = (processed_bytes / elapsed_time) / (1024 * 1024)
-                    percentage_processed = (processed_bytes / file_size) * 100
-                
-                        # Print read speed for each chunk
-                    #print(f'Read speed: {read_speed:.2f} bytes/second')
-                    print(f'Percentage processed: {percentage_processed:.2f}.  Read speed: {read_speed:.2f} MBps')
-                    
-                end_time = time.time() # End time
-                processing_time = end_time - start_time # Calculate processing time
-                
-                # Print final read speed and processing time
-                print(f'Read speed: {read_speed:.2f} bytes/second')
-                print(f'Processing time: {processing_time:.2f} seconds')
+# Remove filepaths from filehashes that are not in toprocess
+print("Removing " + str(len(filehashes)) + " known hashes.")
+filehashes = {k: v for k, v in filehashes.items() if k in toprocess}
+print("Known hashes removed. "  + str(len(toprocess)) + " to do.")
 
-            file_hashes[file_path] = hasher.hexdigest()
+# Initialize dictionaries to store unique and duplicate hashes
+unique_hashes = {}
+duplicate_hashes = {}
 
-    return file_hashes
+filetodo = sorted(toprocess.keys(), key=lambda x: (os.path.basename(x), x), reverse=True)
+# Process files in toprocess in filename order, with multiples of the same filename processed first
+i = 0
+for filepath in filetodo:
+    i +=1
+    print(str(i) + " of " + str(len(filetodo)))
+    if filepath not in filehashes:
+        # Calculate hash for new file
+        file_hash = calculate_hash(filepath)
+        # Check if hash exists in filehashes
+        with open(cache_file, 'w') as csvfile:
+            writer = csv.writer(csvfile)
+            for k, v in filehashes.items():
+                writer.writerow([k, v])
 
-def load_cache(cache_file):
-    """Load existing cache data from the cache file."""
-    cache_data = {}
-    if os.path.exists(cache_file):
-        with open(cache_file, "r", newline="") as f:
-            reader = csv.reader(f)
-            next(reader)  # Skip header row
-            for row in reader:
-                file_path, file_hash = row
-                cache_data[file_path] = file_hash
-    return cache_data
-
-def update_cache(cache_file, file_hashes):
-    """
-    Update CSV cache file with new file hashes.
-
-    Args:
-        cache_file (str): Path to CSV cache file.
-        file_hashes (dict): Dictionary containing file paths and their corresponding hashes.
-    """
-    cache_data = []
-    if os.path.exists(cache_file):
-        with open(cache_file, 'r') as f:
-            reader = csv.reader(f)
-            cache_data = list(reader)
-
-    with open(cache_file, 'w', newline='') as f:
-        writer = csv.writer(f)
-        for file_path, file_hash in file_hashes.items():
-            row = [file_path, file_hash]
-            if row not in cache_data:
-                writer.writerow(row)
-
-def write_csv(file_path, data):
-    """
-    Write data to a CSV file.
-
-    Args:
-        file_path (str): Path to the CSV file.
-        data (list): List of lists representing the data to be written to the CSV file.
-    """
-    with open(file_path, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerows(data)
-
-def main(dir1, dir2, cache_file, unique_hashes_file, duplicate_hashes_file):
-    """
-    Main function to scan two directories recursively, generate file hashes, and update cache and CSV files.
-
-    Args:
-        dir1 (str): Path to the first directory.
-        dir2 (str): Path to the second directory.
-        cache_file (str): Path to the CSV cache file.
-        unique_hashes_file (str): Path to the CSV file for storing unique hashes.
-        duplicate_hashes_file (str): Path to the CSV file for storing duplicate hashes.
-    """
-
-    existing_cache = load_cache(cache_file)
-
-    # Step 1: Get file hashes for dir1
-    file_hashes_dir1 = get_file_hashes(dir1)
-
-    # Step 2: Get file hashes for dir2
-    file_hashes_dir2 = get_file_hashes(dir2)
-
-    # Step 3: Combine file hashes from both directories
-    all_file_hashes = file_hashes_dir1.copy()
-    all_file_hashes.update(file_hashes_dir2)
-
-    # Step 4: Detect unique and duplicate hashes
-    unique_hashes = []
-    duplicate_hashes = []
-    hash_set = set()
-    for file_path, file_hash in all_file_hashes.items():
-        if file_hash not in hash_set:
-            hash_set.add(file_hash)
-            unique_hashes.append([file_hash, file_path])
-            update_cache(cache_file, all_file_hashes)  # Update cache after each hash is created
+        if file_hash in filehashes.values():
+            # Find all filepaths with the same hash
+            duplicate_files = [k for k, v in filehashes.items() if v == file_hash]
+            # Print hash and filepaths
+            print(f"Duplicate hash: {file_hash}")
+            print("Filepaths:")
+            for file in duplicate_files:
+                print(file)
+            # Add hash and filepath to duplicate_hashes dictionary
+            duplicate_hashes[file_hash] = duplicate_files
+            filehashes[filepath] = file_hash
+            with open(duplicate_file, 'w') as csvfile:
+                writer = csv.writer(csvfile)
+                for k, v in duplicate_hashes.items():
+                    writer.writerow([k, ', '.join(v)])
         else:
-            duplicate_hashes.append([file_hash, file_path])
+            # Add hash and filepath to filehashes dictionary
+            filehashes[filepath] = file_hash
+    else:
+        print(filepath + " already hashed.  Load hash")
+        # Get hash for existing file
+        file_hash = filehashes[filepath]
+    # Add hash and filepath to unique_hashes dictionary
+    unique_hashes[file_hash] = filepath
+    # Write hash and filepath to cache.csv
 
-    # Step 5: Update CSV files
-    update_cache(cache_file, all_file_hashes)
-    write_csv(unique_hashes_file, unique_hashes)
-    write_csv(duplicate_hashes_file, duplicate_hashes)
+write_unique_filehashes_to_csv(filehashes,'comp-unique.csv')
 
-    print("Unique Hashes:")
-    for row in unique_hashes:
-        print(f"{row[0]}: {row[1]}")
-    print("Duplicate Hashes:")
-    for row in duplicate_hashes:
-        print(f"{row[0]}: {row[1]}")
+with open(unique_file, 'w') as csvfile:
+    writer = csv.writer(csvfile)
+    for k, v in unique_hashes.items():
+        writer.writerow([k, v])
 
-if __name__ == '__main__':
-    dir1 = "/srv/External_6TB_1/root/Videos/"
-    dir2 = "/srv/mergerfs/data/Video2/"
-    cache_file = 'cache.csv'
-    unique_hashes_file = 'unique_hashes.csv'
-    duplicate_hashes_file = 'duplicate_hashes.csv'
-    main(dir1, dir2, cache_file, unique_hashes_file, duplicate_hashes_file)
