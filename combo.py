@@ -21,7 +21,9 @@ from collections import Counter
 
 # Needs exiftool too
 
-IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.tif', '.tiff', '.bmp')
+#IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.tif', '.tiff', '.bmp')
+#bmp does not support many tags
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.gif', '.tif', '.tiff',)
 TEXT_EXTENSIONS = ('.txt',)
 
 class TruncatedFileHandler(logging.FileHandler):
