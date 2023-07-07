@@ -1,65 +1,58 @@
-import hashlib
 import os
 import csv
-import zipfile
-import tarfile
-import rarfile
-import libarchive.public as public
-from msilib import SummaryInformation
+import hashlib
+import shutil
+import threading
+from multiprocessing import Pool
 
-def get_file_checksum(file_path, algorithm="sha1", block_size=65536):
-    """
-    Calculate the checksum of a file using the given algorithm.
-    """
-    hash_algo = hashlib.new(algorithm)
-    with open(file_path, "rb") as f:
-        while True:
-            data = f.read(block_size)
-            if not data:
-                break
-            hash_algo.update(data)
-    return hash_algo.hexdigest()
-
-def process_archive(archive_path, log_file):
-    """
-    Process an archive and write its checksums to the log file.
-    """
-    archive_name = os.path.basename(archive_path)
-    archive_type = os.path.splitext(archive_path)[1].lower()
+def compute_checksums(file_path):
     try:
-        if archive_type == ".zip":
-            archive = zipfile.ZipFile(archive_path)
-        elif archive_type == ".tar":
-            archive = tarfile.TarFile(archive_path)
-        elif archive_type == ".rar":
-            archive = rarfile.RarFile(archive_path)
-        else:
-            archive = public.file_reader(archive_path, "7zip")
-        
-        for member in archive.getmembers():
-            if member.isfile():
-                member_path = os.path.join(archive_path, member.name)
-                checksum = get_file_checksum(member_path)
-                log_file.writerow([os.path.abspath(member_path), archive_name, checksum])
+        with open(file_path, 'rb') as f:
+            hasher = hashlib.sha256()
+            buf = f.read(65536)
+            while len(buf) > 0:
+                hasher.update(buf)
+                buf = f.read(65536)
+            return hasher.hexdigest()
     except Exception as e:
-        print(f"Error processing {archive_path}: {e}")
-        bad_archive_path = os.path.join(os.path.dirname(archive_path), "badarchives", os.path.basename(archive_path))
-        os.rename(archive_path, bad_archive_path)
-        
+        print(f"Failed to compute checksum for {file_path}: {e}")
+        return None
 
-def process_directory(directory_path):
-    """
-    Recursively process all archives in the given directory.
-    """
-    with open("log.csv", "w", newline="") as f:
+def extract_archive(archive_path, dest_dir):
+    try:
+        shutil.unpack_archive(archive_path, dest_dir)
+        print(f"Extracted {archive_path}")
+    except Exception as e:
+        print(f"Failed to extract {archive_path}: {e}")
+        os.rename(archive_path, os.path.join(os.path.dirname(archive_path), "badarchives", os.path.basename(archive_path)))
+
+def process_archive(root_dir, archive_path, log_file):
+    archive_name = os.path.basename(archive_path)
+    dest_dir = os.path.join(root_dir, os.path.splitext(archive_name)[0])
+    os.makedirs(dest_dir, exist_ok=True)
+    extract_archive(archive_path, dest_dir)
+    for dirpath, dirnames, filenames in os.walk(dest_dir):
+        for filename in filenames:
+            file_path = os.path.join(dirpath, filename)
+            checksum = compute_checksums(file_path)
+            if checksum is not None:
+                log_file.writerow([file_path, archive_name, checksum])
+    shutil.rmtree(dest_dir)
+
+def process_archives_in_dir(root_dir):
+    with open(os.path.join(root_dir, "checksums.csv"), 'w', newline='') as f:
         log_file = csv.writer(f)
-        log_file.writerow(["File Path", "Archive Name", "Checksum"])
-        for root, dirs, files in os.walk(directory_path):
-            for file_name in files:
-                file_path = os.path.join(root, file_name)
-                if os.path.splitext(file_name)[1].lower() in [".zip", ".tar", ".rar", ".7z"]:
-                    process_archive(file_path, log_file)
+        log_file.writerow(["File Path", "Archive Name", "SHA-256 Checksum"])
+        archives = [os.path.join(root, file) for root, dirs, files in os.walk(root_dir) for file in files if os.path.splitext(file)[1] in ['.zip', '.msi', '.tar', '.rar', '.7z']]
+        pool = Pool()
+        for archive_path in archives:
+            pool.apply_async(process_archive, (root_dir, archive_path, log_file))
+        pool.close()
+        pool.join()
 
-if __name__ == "__main__":
-    directory_path = input("Enter directory path: ")
-    process_directory(directory_path)
+if __name__ == '__main__':
+    root_dir = input("Enter the directory path to scan: ")
+    if not os.path.isdir(root_dir):
+        print("Invalid directory path.")
+    else:
+        process_archives_in_dir(root_dir)
