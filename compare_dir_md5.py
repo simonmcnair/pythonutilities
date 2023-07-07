@@ -3,87 +3,75 @@ import hashlib
 import json
 import csv
 
-# Step 1: Start
-dir1 = 'dir1'  # Directory 1
-dir2 = 'dir2'  # Directory 2
-cache_file = 'cache.json'  # Cache JSON file
-unique_file = 'unique.csv'  # Unique hashes CSV file
-duplicate_file = 'duplicate.csv'  # Duplicate hashes CSV file
-
-# Step 2: Read the cache JSON file (if exists) into a dictionary
-cache = {}
-if os.path.exists(cache_file):
-    with open(cache_file, 'r') as f:
-        cache = json.load(f)
-
-# Step 3: Get the file paths from dir1 and dir2 recursively
-file_paths = []
-for dir_path in [dir1, dir2]:
-    for dirpath, _, filenames in os.walk(dir_path):
+def scan_directory(directory):
+    """
+    Recursively scan a directory and return a list of file paths.
+    """
+    file_paths = []
+    for dirpath, dirnames, filenames in os.walk(directory):
         for filename in filenames:
             file_path = os.path.join(dirpath, filename)
             file_paths.append(file_path)
+    return file_paths
 
-# Step 4: Sort the file paths by filename
-file_paths.sort()
+def generate_hash(file_path, chunk_size=1):
+    """
+    Generate a SHA256 hash for a file.
+    """
+    print(f"Generating hash for file: {file_path}")
+    sha256 = hashlib.sha256()
+    with open(file_path, 'rb') as file:
+        while True:
+            data = file.read(chunk_size * 1024 * 1024)  # Read chunk_size MB at a time
+            if not data:
+                break
+            sha256.update(data)
+    return sha256.hexdigest()
 
-unique_hashes = set()  # Set to store unique hashes
-duplicate_hashes = set()  # Set to store duplicate hashes
+def create_json_cache(file_hashes):
+    """
+    Create a JSON cache file with file hashes.
+    """
+    with open('cache.json', 'w') as cache_file:
+        json.dump(file_hashes, cache_file, indent=4)
 
-# Step 5: For each file path
-for file_path in file_paths:
-    # Extract filename
-    filename = os.path.basename(file_path)
+def update_json_cache(file_hashes):
+    """
+    Update an existing JSON cache file with file hashes.
+    """
+    with open('cache.json', 'r') as cache_file:
+        existing_hashes = json.load(cache_file)
+    existing_hashes.update(file_hashes)
+    with open('cache.json', 'w') as cache_file:
+        json.dump(existing_hashes, cache_file, indent=4)
 
-    # If filename exists in cache dictionary
-    if filename in cache:
-        hash_value = cache[filename]
-        # Check if hash value is a duplicate
-        if hash_value in unique_hashes or hash_value in duplicate_hashes:
-            duplicate_hashes.add(hash_value)
-            print(f"Duplicate hash: {hash_value} - File path: {file_path}")
+def create_csv_file(file_hashes, output_file):
+    """
+    Create a CSV file with file hashes.
+    """
+    with open(output_file, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow(['Hash', 'File Path'])
+        for file_path, file_hash in file_hashes.items():
+            writer.writerow([file_hash, file_path])
+
+def process_files(dir1, dir2, chunk_size):
+    """
+    Process files in dir1 and dir2, generate hashes, and create JSON cache and CSV files.
+    """
+    file_hashes = {}
+    file_paths = scan_directory(dir1) + scan_directory(dir2)
+    for file_path in file_paths:
+        file_hash = generate_hash(file_path, chunk_size)
+        if file_hash not in file_hashes:
+            file_hashes[file_hash] = file_path
         else:
-            unique_hashes.add(hash_value)
+            print(f"Duplicate hash found: {file_hash}")
+            print(f"File Path: {file_path}")
+            print(f"File Path with same hash: {file_hashes[file_hash]}")
+            print("------")
+    if not os.path.exists('cache.json'):
+        create_json_cache(file_hashes)
     else:
-        # Print "Processing file: {file_path}"
-        print(f"Processing file: {file_path}")
-
-        # Generate SHA256 hash value for file
-        hash_object = hashlib.sha256()
-        with open(file_path, 'rb') as f:
-            while True:
-                data = f.read(65536)
-                if not data:
-                    break
-                hash_object.update(data)
-        hash_value = hash_object.hexdigest()
-
-        # Update cache dictionary with filename and hash value
-        cache[filename] = hash_value
-
-        # Add hash value to unique hashes set
-        unique_hashes.add(hash_value)
-
-# Step 6: Write unique hashes set to unique.csv
-with open(unique_file, 'w', newline='') as f:
-    writer = csv.writer(f)
-    writer.writerow(['Hash', 'Filepath'])
-    for hash_value in unique_hashes:
-        for filename, value in cache.items():
-            if value == hash_value:
-                writer.writerow([hash_value, filename])
-
-# Step 7: Write duplicate hashes set to duplicate.csv
-with open(duplicate_file, 'w', newline='') as f:
-    writer = csv.writer(f)
-    writer.writerow(['Hash', 'Filepath'])
-    for hash_value in duplicate_hashes:
-        for filename, value in cache.items():
-            if value == hash_value:
-                writer.writerow([hash_value, filename])
-
-# Step 8: Write cache dictionary to cache.json
-with open(cache_file, 'w') as f:
-    json.dump(cache, f, indent=4)
-
-# Step 9: End
+        update_json_cache(file_hashes)
+    create_csv_file(file_hashes, 'unique_hashes.csv')
