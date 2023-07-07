@@ -14,12 +14,15 @@ from datetime import datetime
 import logging
 from logging.handlers import RotatingFileHandler
 from tqdm import tqdm
+import exiftool
+from exiftool.exceptions import ExifToolExecuteError
+import hashlib
 
 
 import shutil
 from collections import Counter
 
-#pip install opencv-python pillow huggingface_hub onnxruntime
+#pip install opencv-python pillow huggingface_hub onnxruntime pyexiftool
 #from timer import Timer
 
 # Needs exiftool too
@@ -337,6 +340,9 @@ def delete_file(file_path):
         logger.info(file_path + ".  Can only delete text files")
         return True
 
+
+
+    
 def move_file_to_prefixed_folder(filepath, text_string):
     cwd = os.getcwd()
     abs_filepath = os.path.abspath(filepath)
@@ -354,18 +360,19 @@ def move_file_to_prefixed_folder(filepath, text_string):
 def exiftool_del_dupetags(path):
     logger.info("exiftool_del_dupetags: " + path + ": Removing duplicate tags")
     try:
-        output = subprocess.check_output(['exiftool', \
-                                              '-overwrite_original' , \
-                                                '-P', \
-                                                '-XMP:Subject<${XMP:Subject;NoDups(1)}', \
-                                                '-IPTC:Keywords<${IPTC:Keywords;NoDups(1)}', \
-                                                '-XMP:CatalogSets<${XMP:CatalogSets;NoDups(1)}', \
-                                                '-XMP:TagsList<${XMP:TagsList;NoDups(1)}', \
-                                                path], \
-                                                stderr=subprocess.STDOUT, universal_newlines=True)
-        logger.info("exiftool_del_dupetags MODIFY success : " + path + ". output: " + output)
+        exiftool = exiftool.ExifTool()
+        exiftool.overwrite_original()
+        exiftool.set_tags('-P',
+                          '-XMP:Subject<${XMP:Subject;NoDups(1)}',
+                          '-IPTC:Keywords<${IPTC:Keywords;NoDups(1)}',
+                          '-XMP:CatalogSets<${XMP:CatalogSets;NoDups(1)}',
+                          '-XMP:TagsList<${XMP:TagsList;NoDups(1)}')
+        exiftool.execute([path])
+        output = exiftool.get_output()
+        logger.info("exiftool_del_dupetags MODIFY success: " + path + ". output: " + output)
+        
     except Exception as e:
-        logger.error("Exception in exiftool_del_dupetags : " + path + ". Error: " + str(e))
+        logger.error("Exception in exiftool_del_dupetags: " + path + ". Error: " + str(e))
         return False
 
     return True
@@ -373,125 +380,113 @@ def exiftool_del_dupetags(path):
 def exiftool_copy_XMPSubject_to_TagsList(path):
     logger.info("exiftool_copy_tags_to_TagsList: " + path + ": Removing duplicate tags")
     try:
-        output_xmp = subprocess.check_output(['exiftool', '-overwrite_original' ,'-P', '-sep "##"', '-XMP:TagsList<${XMP:Subject;NoDups(1)}', path], stderr=subprocess.STDOUT, universal_newlines=True)
-        logger.info("exiftool_copy_tags_to_TagsList MODIFY success XMP: " + path + ". output: " + output_xmp)
+        ex = exiftool.ExifToolHelper()
+        ex.common_args(["-P","-G", "-n", "-overwrite_original", '-sep', '##'])
+        ex.set_tags('-XMP:TagsList<${XMP:Subject;NoDups(1)}')
+        ex.execute([path])
+        output = ex.get_output()
+        logger.info("exiftool_copy_tags_to_TagsList MODIFY success XMP: " + path + ". output: " + output)
+        
     except Exception as e:
         logger.error("Exception in exiftool_copy_tags_to_TagsList XMP: " + path + ". Error: " + str(e))
+        return False
 
-    
+    return True
+
 def exiftool_is_photo_tagged(photo_path):
     try:
-        output = subprocess.check_output(['exiftool', '-P', '-s', '-XMP-acdsee:tagged', photo_path]).decode().strip()
-        #logger.info("output: " + output)
-        if 'true' in output.lower():
-            #logger.info(photo_path + " already tagged")
+        et =  exiftool.ExifToolHelper()
+        ret = et.get_tags(files=photo_path, tags="XMP-acdsee:tagged",params=["-P","-G", "-n", "-overwrite_original"])[0]['XMP:Tagged']
+
+        if ret == None:
+            return False
+        elif ret == True:
             return True
         else:
-            logger.info(photo_path + "  is not tagged as processed. " + str(output))
+            logger.info(photo_path + " is not tagged as processed. ")
             return False
     except Exception as e:
-        logger.error("Exception exiftool_is_photo_tagged: "+ photo_path + ".  Error " + str(e.returncode) + ".  " + str(e.output) + ".")
-        #move_file_to_prefixed_folder(photo_path, 'badfiles')
+        logger.error("Exception exiftool_is_photo_tagged: " + photo_path + ". Error " + str(e.returncode) + ". " + str(e.output) + ".")
+        # move_file_to_prefixed_folder(photo_path, 'badfiles')
         return False
 
-def exiftool_make_photo_tagged(is_tagged, photo_path):
+def exiftool_make_photo_tagged(photo_path):
+    if exiftool_is_photo_tagged(photo_path):
+        print("Photo Already tagged")
+    else:
+        with exiftool.ExifToolHelper() as et:
+            et.set_tags(
+                files=photo_path,
+                params=["-P","-G", "-n", "-overwrite_original"],
+                tags={"XMP-acdsee:tagged": ["False"]}
+            )    
+
+
+def exiftool_hash(path):
+
+    print("creating hash for " + path)
+    #image_path = os.path.join(root, picture_path)
     try:
-        if not exiftool_is_photo_tagged(photo_path) :
-            output = subprocess.check_output(['exiftool', '-overwrite_original', '-P', '-s', '-XMP-acdsee:tagged=' + str(is_tagged), photo_path]).decode().strip()
-            logger.info(photo_path + ".  Wasn't tagged. trying to tag as " + str(is_tagged) + " !  Output: " + output)
-            if 'updated' in output.lower():
-                logger.info(photo_path + ".  successfully  MODIFY tagged as " + str(is_tagged) + " !  Output: " + output)
-                return True
-            else:
-                logger.error("Failed to change photo " + photo_path + " tagged to  " + str(is_tagged))
-                return False
-        else:
-            logger.info(photo_path + " is already tagged.  Not modifying")
-            return True
+        with Image.open(path).convert('RGB') as image:
+            # Get the image data as bytes
+            image_bytes = image.tobytes()
+        # Create a hash object and update with image bytes
+        hash_object = hashlib.blake2b(image_bytes)
+        hash_value = hash_object.hexdigest()
+
+        with exiftool.ExifTool(common_args=["-P","-G", "-n", "-overwrite_original",]) as ex:
+            res = (ex.execute(*['-EXIF:RawImageDigest<$imagedatamd5','-XMP-et:OriginalImageMD5='+ hash_value,'-XMP:EmbeddedXMPDigest='+ hash_value] + [path]))
+            logger.info("Result for " + path + " with hash " + hash_value + " was " + (res))
+            print("Result for " + path + " with hash " + hash_value + " was " + (res))
+
+
     except Exception as e:
-        logger.error("Exception " + str(e.returncode) + ".  " + str(e.output) + ".  From " + photo_path)
+        logger.error("Exception " + str(e.returncode) + ". " + str(e.output) + ". From " + path)
         return False
+
+
 def exiftool_batch_untag(path):
     try:
-            output = subprocess.check_output(['exiftool', '-overwrite_original', '-P', '-s', '-XMP-acdsee:tagged=False', '-r' ,path])
-            logger.info(path + ".  Wasn't tagged.  trying to tag as False !  Output: " + output)
-            if 'updated' in output.lower():
-                logger.info(path + ".  successfully  MODIFY tagged as False !  Output: " + output)
-                return True
-            else:
-                return False
+
+        ex = exiftool.ExifToolHelper()
+        ex.overwrite_original()
+        ex.set_tags('-P', '-s', '-XMP-acdsee:tagged=False', '-r', path)
+        ex.execute([])
+        output = ex.get_output()
+        
+
+        output = output.decode().strip()
+        logger.info(path + ". Wasn't tagged. Trying to tag as False! Output: " + output)
+        if 'updated' in output.lower():
+            logger.info(path + ". Successfully MODIFY tagged as False! Output: " + output)
+            return True
+        else:
+            return False
 
     except Exception as e:
-        logger.error("Exception " + str(e.returncode) + ".  " + str(e.output) + ".  From " + path)
+        logger.error("Exception " + str(e.returncode) + ". " + str(e.output) + ". From " + path)
         return False
+
+
 
 
 def exiftool_get_existing_tags(img_path):
-    try:
+
+    et =  exiftool.ExifToolHelper()
+    ret = et.get_tags(files=img_path, tags={'XMP:Subject','IPTC:Keywords','XMP:CatalogSets','XMP:TagsList'},params=["-P","-G", "-n", "-overwrite_original"])
+
+    if ret != '':
         tags_dict = {
-            'XMP:Subject': [],
-            'IPTC:Keywords': [],
-            'XMP:CatalogSets': [],
-            'XMP:TagsList': []
-        }
+                'XMP:Subject': [],
+                'IPTC:Keywords': [],
+                'XMP:CatalogSets': [],
+                'XMP:TagsList': []
+            }
 
-        loopcounter = 1
-        Process = True
-        check1 = False
-        check2 = False
-        removespaces = False
-        while Process:
-            existing_tags = subprocess.check_output(['exiftool', '-XMP:Subject', '-IPTC:Keywords', '-XMP:CatalogSets', '-XMP:TagsList', img_path]).decode().strip()
-            logger.debug(img_path + ": exiftool_get_existing_tags exif output: \n" + existing_tags)
-            separator = '\n'
-            print("LOOP " + str(loopcounter) + " for " + img_path)
-            loopcounter+=1
-           
-            if not existing_tags:
-                print("image has no tags")
-                return None
-            else:
-                if '\r\n' in existing_tags:
-                    print("exiftool_get_existing_tags: rn detected. Windows?")
-                    separator = '\r\n'
-
-                if removespaces == True:
-                    ret = subprocess.check_output(['exiftool','-P','-overwrite_original', '-api', '"Filter=s/^ +//"','-TagsFromFile','@','-subject','-XMP:subject','-IPTC:Keywords','-XMP:CatalogSets','-XMP:TagsList',img_path])
-                    logger.info("output was " + str(ret) + " for " + img_path)
-                    
-                for tag in existing_tags.split(separator):
-                    logger.debug(img_path + ": exiftool_get_existing_tags : tag=" + tag)
-                    for tag_type in tags_dict.keys():
-                        new = tag_type.split(':')[1]
-                        if new == 'CatalogSets':
-                            new ='Catalog Sets'
-                        if new == 'TagsList':
-                            new ='Tags List'
-                        logger.debug(img_path + ": exiftool_get_existing_tags looking for " + new)
-                        if tag.startswith(new):
-                            tag_value = tag.split(':', 1)[1].strip()  # Split using the first colon only
-                            
-                        #    occurrences = tag_value.count(",  ")
-                        #    if occurrences >0:
-                        #        logger.info("!!!!!!!!!!!!!!!!!!!!!!!!! multiple spaces !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
-                        #        print(      "!!!!!!!!!!!!!!!!!!!!!!!!! multiple spaces !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
-                        #        removespaces = True
-                        #   else:
-                            check1 = True
-                            
-                        # occurrences = tag_value.count(", ")
-                        # if occurrences >0:
-                        #     logger.info("!!!!!!!!!!!!!!!!!!!!!!!!! one leading space !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
-                        #     print(      "!!!!!!!!!!!!!!!!!!!!!!!!! one leading space !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
-                        #     removespaces = True
-                        # else:
-                            check2 = True
-                                
-                            if check1 == True and check2 == True:
-                                logger.info("No space padding for file " + img_path + ".  Continuing")
-                                Process = False
-                            tags_dict[tag_type].extend(tag_value.split(', '))
-                            #tags_dict[tag_type].extend([tag.strip() for tag in tag_value.split(',')])
+        tags_dict['XMP:Subject'] = ret[0]['XMP:Subject']
+        tags_dict['IPTC:Keywords']  = ret[0]['IPTC:Keywords']
+        tags_dict['XMP:CatalogSets']  = ret[0]['XMP:CatalogSets']
+        tags_dict['XMP:TagsList']  = ret[0]['XMP:TagsList']
 
         logger.debug(img_path + ". exiftool_get_existing_tags Exiftool output XMP:Subject      :" + str(tags_dict['XMP:Subject']))
         logger.debug(img_path + ". exiftool_get_existing_tags Exiftool output IPTC:Keywords    :" + str(tags_dict['IPTC:Keywords']))
@@ -499,51 +494,43 @@ def exiftool_get_existing_tags(img_path):
         logger.debug(img_path + ". exiftool_get_existing_tags Exiftool output XMP:TagsList    :" + str(tags_dict['XMP:TagsList']))
 
         return tags_dict
+    else:
+        return None
 
-    except Exception as e:
-        logger.error("Exception in exiftool_get_existing_tags: " + img_path + ". Error: " + str(e))
-        return {}
     
 def exiftool_Update_tags(img_path, tags):
-    cmd = ['exiftool', '-overwrite_original', '-P']
-    try:
-       existing_tags = exiftool_get_existing_tags(img_path)
-    except Exception as e:
-        logger.error("Exception in exiftool_Update_tags: " + img_path + ".  error " + str(e))
-        return False
+#    cmd = ['-overwrite_original', '-P']
+    cmd = ['']
+    existing_tags = exiftool_get_existing_tags(img_path)
+    updated = False
 
-    try:
-        updated = False
+    if existing_tags == None:
+        print("no preexisting tags")
+        cmd.append(f'-{tag_type}-="{tag}"')
+        cmd.append(f'-{tag_type}+="{tag}"')
+        updated = True
+    else:
         for tag_type, existing_tags_list in existing_tags.items():
             for tag in tags:
                 tag = tag.strip()
                 if tag and tag not in existing_tags_list:
                     logger.debug("exiftool_Update_tags: need to add " + tag_type + " field " + tag + " to " + img_path)
-                    #cmd.append(f'-{tag_type}:{tag_type}+={tag}')
-                    cmd.append(f'-{tag_type}-="{tag}" -{tag_type}+="{tag}"')
+                    cmd.append(f'-{tag_type}-="{tag}"')
+                    cmd.append(f'-{tag_type}+="{tag}"')
                     updated = True
 
-        if updated:
- #           logger.debug("Wierd thing I don't understand : " + ['-' + tag_type + ':' + tag_type + '+=' + tag for tag_type in existing_tags.keys() for tag in tags])
-            cmd.extend(['-' + tag_type + '+=' + tag for tag_type in existing_tags.keys() for tag in tags])
-            cmd.append(img_path)
-            try:
-                ret = subprocess.run(cmd, stderr=subprocess.STDOUT, universal_newlines=True)
-                logger.debug("exiftool_Update_tags command line was " +str(cmd))
-                logger.info("exiftool_Update_tags  MODIFY" + img_path + ".  Exiftool update completed successfully.")
-                logger.debug("exiftool_Update_tags  MODIFY" + img_path + ".  Exiftool update completed successfully.  " + str(ret))
-                return True
-            except Exception as e:
-                logger.error("Exception in exiftool_Update_tags: " + img_path + ".  error " + str(e))
-                return False
-        else:
-            logger.info(img_path + ":  exiftool_Update_tags.  Nothing to do, tags (" + str(tags) + ")are correct")
-            return True 
-
-    except Exception as e:
-        logger.error("Exception in exiftool_Update_tags: " + img_path + ".  error " + str(e))
-        return False
-
+    if updated:
+        ex = exiftool.ExifToolHelper()
+        ex.execute(cmd + [img_path])
+        output = ex.get_output()
+        
+        logger.debug("exiftool_Update_tags command line was " + str(cmd + [img_path]))
+        logger.info("exiftool_Update_tags  MODIFY" + img_path + ". Exiftool update completed successfully.")
+        logger.debug("exiftool_Update_tags  MODIFY" + img_path + ". Exiftool update completed successfully. " + str(output))
+        return True
+    else:
+        logger.info(img_path + ":  exiftool_Update_tags. Nothing to do, tags (" + str(tags) + ") are correct")
+        return True
 
 def are_tags_correct(img_path, tags):
     try:
@@ -715,7 +702,7 @@ def Add_a_Tag(image_path, tag):
         exiftool_del_dupetags(image_path)
 
 
-def process_images_in_directory(directory, tag,person):
+def process_images_in_directory(directory, tag=False,person=False,Hashimages=False):
     # Process each image in the directory
     image_paths = []
     overall_processed_images = 0
@@ -751,7 +738,7 @@ def process_images_in_directory(directory, tag,person):
         for image_path in image_paths:
             print(str(cnt) + "." + image_path)
             cnt +=1
-            if tag == "" and person == False:
+            if tag == False and person == False and Hashimages == False:
                 print("Processing as normal")
                 future = executor.submit(process_file, image_path)
                 futures.append(future)
@@ -760,16 +747,17 @@ def process_images_in_directory(directory, tag,person):
                 #parent_directory = os.path.dirname(image_path)
                 parent_directory = os.path.basename(os.path.dirname(image_path))
                 person2 =[]
-                person2.append("People/" + parent_directory)
-                #person2.append("Person/" + parent_directory)
+                person2.append("Person/" + parent_directory)
                 print("Add " + str(person2) + " to file " + image_path + " and process as adding parent folder as person tag")
                 future = executor.submit(Add_a_Tag, image_path, person2)
                 futures.append(future)                
-            if tag != "":
+            if tag != False:
                 print("Adding a tag to a file")
                 future = executor.submit(Add_a_Tag, image_path, tag)
                 futures.append(future)
-
+            if Hashimages == True:
+                future = executor.submit(exiftool_hash, image_path)
+                futures.append(future)                
 
     # Use tqdm to display progress bar
         with tqdm(total=len(futures)) as pbar:
@@ -798,34 +786,32 @@ def process_images_in_directory(directory, tag,person):
 # Process the images in the directory and generate captions
 #process_images_in_directory(image_directory)
 
-def execute_script(directory=None, tag=None, person=None):
+def execute_script(directory=None, tag=None, person=False,hashimage=False):
     if directory is None:
         if os.name == 'nt':  # Windows
             #directory = r'X:\\Stable\\dif\\stable-diffusion-webui-docker\\output'
-            directory = r'Z:\Stable\dif\stable-diffusion-webui-docker\output\\'
+            directory = r'Z:\Pron\Pics\Misc\\'
         else:  # Linux or macOS
-            directory = '/srv/dev-disk-by-uuid-e83913b3-e590-4dc8-9b63-ce0bdbe56ee9/Stable/dif/stable-diffusion-webui-docker/output'
+            #directory = '/srv/dev-disk-by-uuid-e83913b3-e590-4dc8-9b63-ce0bdbe56ee9/Stable/dif/stable-diffusion-webui-docker/output'
+            directory = '/srv/dev-disk-by-uuid-342ac512-ae09-47a7-842f-d3158537d395/mnt/Pron/Pics'
 
-    if tag is None:
-        taglist = ""  # Default value if no tag is provided
-    else:
+    if tag != None:
         taglist = tag.split(",")
+    else:
+        taglist = False
 
-    if person is None:
-    #remember to change back
-        print("executing default of disabled")
-        personopt = False  # Default value if no tag is provided
-    elif person == 'True':
+    if person == 'True':
         print("Person and personopt set to true")
         personopt = True
-    elif person == 'False':
-        print("person and personopt set to false")
-        personopt = False
     else:
-        print("error")
-        exit
-
+        personopt = False
     
+    if hashimage == 'True':
+        print("hashimage set to true")
+        hashimageopt = True
+    
+
+    hashimageopt = True
 
     # Change the current working directory to the specified directory
     #os.chdir(directory)
@@ -833,7 +819,7 @@ def execute_script(directory=None, tag=None, person=None):
     # Execute your script here
     # For demonstration purposes, let's print the current working directory
     #logger.info("Current working directory:", os.getcwd())
-    process_images_in_directory(directory, taglist,personopt)
+    process_images_in_directory(directory, taglist,personopt,hashimageopt)
     logger.info("Processing complete!")
 
 def execute_single(file, tag=None):
@@ -854,16 +840,18 @@ if __name__ == "__main__":
         print("path command line " + str(sys.argv[1]))
         print("tag arg on command line " + str(sys.argv[2]))
         print("tag person command line " + str(sys.argv[3]))
+        print("add image hash " + str(sys.argv[4]))
 
         path_arg = sys.argv[1]
         tag_arg = sys.argv[2] if len(sys.argv) >= 2 else None
         tag_person = sys.argv[3] if len(sys.argv) >= 3 else None
+        hashfile = sys.argv[4] if len(sys.argv) >= 4 else None
         abs_path = os.path.abspath(path_arg)
 
         print("path: " + abs_path)
         if os.path.isdir(abs_path):
             # The provided argument is a directory
-            execute_script(directory=abs_path, tag=tag_arg,person=tag_person)
+            execute_script(directory=abs_path, tag=tag_arg,person=tag_person,hashimage=hashfile)
         elif os.path.isfile(abs_path):
             # The provided argument is a file
             execute_single(abs_path, tag=tag_arg)
