@@ -335,7 +335,6 @@ def delete_file(file_path):
         logger.info(file_path + ".  Can only delete text files")
         return True
 
-
 def move_file_to_prefixed_folder(filepath, text_string):
     cwd = os.getcwd()
     abs_filepath = os.path.abspath(filepath)
@@ -353,31 +352,18 @@ def move_file_to_prefixed_folder(filepath, text_string):
 def exiftool_del_dupetags(path):
     logger.info("exiftool_del_dupetags: " + path + ": Removing duplicate tags")
     try:
-        output_xmp = subprocess.check_output(['exiftool', '-overwrite_original' ,'-P', '-m', '-sep', '''##''', '''-XMP:Subject<${XMP:Subject;NoDups(1)}''', path], stderr=subprocess.STDOUT, universal_newlines=True)
-        logger.info("exiftool_del_dupetags MODIFY success XMP: " + path + ". output: " + output_xmp)
+        output = subprocess.check_output(['exiftool', \
+                                              '-overwrite_original' , \
+                                                '-P', \
+                                                '-XMP:Subject<${XMP:Subject;NoDups(1)}', \
+                                                '-IPTC:Keywords<${IPTC:Keywords;NoDups(1)}', \
+                                                '-XMP:CatalogSets<${XMP:CatalogSets;NoDups(1)}', \
+                                                '-XMP:TagsList<${XMP:TagsList;NoDups(1)}', \
+                                                path], \
+                                                stderr=subprocess.STDOUT, universal_newlines=True)
+        logger.info("exiftool_del_dupetags MODIFY success : " + path + ". output: " + output)
     except Exception as e:
-        logger.error("Exception in exiftool_del_dupetags XMP: " + path + ". Error: " + str(e))
-        return False
-
-    try:
-        output_iptc = subprocess.check_output(['exiftool', '-overwrite_original', '-P', '-m', '-sep', '''##''', '''-IPTC:Keywords<${IPTC:Keywords;NoDups(1)}''', path], stderr=subprocess.STDOUT, universal_newlines=True)
-        logger.info("exiftool_del_dupetags MODIFY success IPTC: " + path + ". output: " + output_iptc)
-    except Exception as e:
-        logger.error("Exception in exiftool_del_dupetags IPTC: " + path + ". Error: " + str(e))
-        return False
-
-    try:
-        output_CatalogSets = subprocess.check_output(['exiftool', '-overwrite_original' ,'-P', '-m', '-sep', '''##''', '''-XMP:CatalogSets<${XMP:CatalogSets;NoDups(1)}''', path], stderr=subprocess.STDOUT, universal_newlines=True)
-        logger.info("exiftool_del_dupetags MODIFY success CatalogSets: " + path + ". output: " + output_CatalogSets)
-    except Exception as e:
-        logger.error("Exception in exiftool_del_dupetags CatalogSets: " + path + ". Error: " + str(e))
-        return False
-
-    try:
-        output_TagsList = subprocess.check_output(['exiftool', '-overwrite_original', '-P', '-m', '-sep', '''##''', '''-XMP:TagsList<${XMP:TagsList;NoDups(1)}''', path], stderr=subprocess.STDOUT, universal_newlines=True)
-        logger.info("exiftool_del_dupetags MODIFY success Tagslist: " + path + ". output: " + output_TagsList)
-    except Exception as e:
-        logger.error("Exception in exiftool_del_dupetags TagsList: " + path + ". Error: " +  str(e))
+        logger.error("Exception in exiftool_del_dupetags : " + path + ". Error: " + str(e))
         return False
 
     return True
@@ -385,7 +371,7 @@ def exiftool_del_dupetags(path):
 def exiftool_copy_XMPSubject_to_TagsList(path):
     logger.info("exiftool_copy_tags_to_TagsList: " + path + ": Removing duplicate tags")
     try:
-        output_xmp = subprocess.check_output(['exiftool', '-overwrite_original' ,'-P', '-m', '-sep', '##', '-XMP:TagsList<${XMP:Subject;NoDups(1)}', path], stderr=subprocess.STDOUT, universal_newlines=True)
+        output_xmp = subprocess.check_output(['exiftool', '-overwrite_original' ,'-P', '-sep "##"', '-XMP:TagsList<${XMP:Subject;NoDups(1)}', path], stderr=subprocess.STDOUT, universal_newlines=True)
         logger.info("exiftool_copy_tags_to_TagsList MODIFY success XMP: " + path + ". output: " + output_xmp)
     except Exception as e:
         logger.error("Exception in exiftool_copy_tags_to_TagsList XMP: " + path + ". Error: " + str(e))
@@ -403,7 +389,7 @@ def exiftool_is_photo_tagged(photo_path):
             return False
     except Exception as e:
         logger.error("Exception exiftool_is_photo_tagged: "+ photo_path + ".  Error " + str(e.returncode) + ".  " + str(e.output) + ".")
-        move_file_to_prefixed_folder(photo_path, 'badfiles')
+        #move_file_to_prefixed_folder(photo_path, 'badfiles')
         return False
 
 def exiftool_make_photo_tagged(is_tagged, photo_path):
@@ -440,8 +426,6 @@ def exiftool_batch_untag(path):
 
 def exiftool_get_existing_tags(img_path):
     try:
-        existing_tags = subprocess.check_output(['exiftool', '-XMP:Subject', '-IPTC:Keywords', '-XMP:CatalogSets', '-XMP:TagsList', img_path]).decode().strip()
-
         tags_dict = {
             'XMP:Subject': [],
             'IPTC:Keywords': [],
@@ -449,22 +433,59 @@ def exiftool_get_existing_tags(img_path):
             'XMP:TagsList': []
         }
 
-        logger.debug(img_path + ": exiftool_get_existing_tags exif output: \n" + existing_tags)
-        separator = '\n'
-        
-        if '\r\n' in existing_tags:
-            print("exiftool_get_existing_tags: rn detected. Windows?")
-            separator = '\r\n'
+        loopcounter = 1
+        Process = True
+        check1 = False
+        check2 = False
+        removespaces = False
+        while Process:
+            existing_tags = subprocess.check_output(['exiftool', '-XMP:Subject', '-IPTC:Keywords', '-XMP:CatalogSets', '-XMP:TagsList', img_path]).decode().strip()
+            logger.debug(img_path + ": exiftool_get_existing_tags exif output: \n" + existing_tags)
+            separator = '\n'
+            print("LOOP " + str(loopcounter) + " for " + img_path)
+            loopcounter+=1
+           
+            if '\r\n' in existing_tags:
+                print("exiftool_get_existing_tags: rn detected. Windows?")
+                separator = '\r\n'
 
-        for tag in existing_tags.split(separator):
-            logger.debug(img_path + ": exiftool_get_existing_tags : tag=" + tag)
-            for tag_type in tags_dict.keys():
-                new = tag_type.split(':')[1]
-                logger.debug(img_path + ": exiftool_get_existing_tags looking for " + new)
-                if tag.startswith(new):
-                    tag_value = tag.split(':', 1)[1].strip()  # Split using the first colon only
-                    #tags_dict[tag_type].extend(tag_value.split(','))
-                    tags_dict[tag_type].extend([tag.strip() for tag in tag_value.split(',')])
+            if removespaces == True:
+                ret = subprocess.check_output(['exiftool','-P','-overwrite_original', '-api', '"Filter=s/^ +//"','-TagsFromFile','@','-subject','-XMP:subject','-IPTC:Keywords','-XMP:CatalogSets','-XMP:TagsList',img_path])
+                logger.info("output was " + str(ret) + " for " + img_path)
+                
+            for tag in existing_tags.split(separator):
+                logger.debug(img_path + ": exiftool_get_existing_tags : tag=" + tag)
+                for tag_type in tags_dict.keys():
+                    new = tag_type.split(':')[1]
+                    if new == 'CatalogSets':
+                        new ='Catalog Sets'
+                    if new == 'TagsList':
+                        new ='Tags List'
+                    logger.debug(img_path + ": exiftool_get_existing_tags looking for " + new)
+                    if tag.startswith(new):
+                        tag_value = tag.split(':', 1)[1].strip()  # Split using the first colon only
+                        
+                        occurrences = tag_value.count(",  ")
+                        if occurrences >0:
+                            logger.info("!!!!!!!!!!!!!!!!!!!!!!!!! multiple spaces !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
+                            print(      "!!!!!!!!!!!!!!!!!!!!!!!!! multiple spaces !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
+                            removespaces = True
+                        else:
+                            check1 = True
+                        
+                       # occurrences = tag_value.count(", ")
+                       # if occurrences >0:
+                       #     logger.info("!!!!!!!!!!!!!!!!!!!!!!!!! one leading space !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
+                       #     print(      "!!!!!!!!!!!!!!!!!!!!!!!!! one leading space !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
+                       #     removespaces = True
+                       # else:
+                            check2 = True
+                            
+                        if check1 == True and check2 == True:
+                            logger.info("No space padding for file " + img_path + ".  Continuing")
+                            Process = False
+                        tags_dict[tag_type].extend(tag_value.split(', '))
+                        #tags_dict[tag_type].extend([tag.strip() for tag in tag_value.split(',')])
 
         logger.debug(img_path + ". exiftool_get_existing_tags Exiftool output XMP:Subject      :" + str(tags_dict['XMP:Subject']))
         logger.debug(img_path + ". exiftool_get_existing_tags Exiftool output IPTC:Keywords    :" + str(tags_dict['IPTC:Keywords']))
@@ -493,7 +514,7 @@ def exiftool_Update_tags(img_path, tags):
                 if tag and tag not in existing_tags_list:
                     logger.debug("exiftool_Update_tags: need to add " + tag_type + " field " + tag + " to " + img_path)
                     #cmd.append(f'-{tag_type}:{tag_type}+={tag}')
-                    cmd.append(f'-{tag_type}-=""{tag}"" -{tag_type}+=""{tag}""')
+                    cmd.append(f'-{tag_type}-="{tag}" -{tag_type}+="{tag}"')
                     updated = True
 
         if updated:
