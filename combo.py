@@ -245,75 +245,6 @@ def get_tags():
     print("get tags")
 
 
-def build_command(img_path, tags):
-    try:
-        cmd = ['exiftool', '-overwrite_original', '-P']
-        existing_tags = subprocess.check_output(['exiftool', '-P' , '-s', '-sep', ',', '-XMP:Subject', '-IPTC:Keywords', '-XMP:CatalogSets', '-XMP:TagsList', img_path]).decode().strip()
-
-        existing_xmp_tags = []
-        existing_iptc_tags = []
-        existing_CatalogSets_tags = []
-        existing_TagsList_tags = []
-        seperator = '\n'
-
-        if '\r\n' in existing_tags:
-            print("buildcommand: rn detected.  Windows ?")
-            seperator = '\r\n'
-            
-    
-        for tag in existing_tags.split(seperator):
-            if tag.startswith('Subject'):
-                existing_xmp_tags.extend(tag.split(':')[1].strip().split(','))
-            elif tag.startswith('Keywords'):
-                existing_iptc_tags.extend(tag.split(':')[1].strip().split(','))
-            elif tag.startswith('CatalogSets'):
-                existing_CatalogSets_tags.extend(tag.split(':')[1].strip().split(','))
-            elif tag.startswith('TagsList'):
-                existing_TagsList_tags.extend(tag.split(':')[1].strip().split(','))
-        
-        if not existing_xmp_tags:
-            existing_xmp_tags = [substr for substr in existing_xmp_tags if substr]
-        if not existing_iptc_tags:
-            existing_iptc_tags = [substr for substr in existing_iptc_tags if substr]
-        if not existing_CatalogSets_tags:
-            existing_CatalogSets_tags = [substr for substr in existing_CatalogSets_tags if substr]
-        if not existing_TagsList_tags:
-            existing_TagsList_tags = [substr for substr in existing_TagsList_tags if substr]
-
-
-      #  logger.info(img_path + " Current XMP tags are " + str(existing_xmp_tags))
-      #  logger.info(img_path + " Current iptc tags are " + str(existing_iptc_tags))
-      #  logger.info(img_path + " Current CatalogSets tags are " + str(existing_CatalogSets_tags))
-      #  logger.info(img_path + " Current TagsList tags are " + str(existing_TagsList_tags))
-        updated = False
-        for tag in tags:
-            tag = tag.strip()
-            if tag and tag not in existing_xmp_tags:
-                logger.info("buildcommand: need to add xmp field " + tag + " to " + img_path)
-                cmd.append(f'-XMP:Subject+={tag}')
-                updated = True
-            if tag and tag not in existing_iptc_tags:
-                logger.info("buildcommand: need to add iptc field " + tag + " to " + img_path)
-                cmd.append(f'-iptc:keywords+={tag}')
-                updated = True
-            if tag and tag not in existing_CatalogSets_tags:
-                # Add the tag to CatalogSets
-                logger.info("buildcommand: need to add catalogset field " + tag + " to " + img_path)
-                cmd.append(f'-XMP:CatalogSets+={tag}')
-                updated = True
-            if tag and tag not in existing_TagsList_tags:
-                # Add the tag to tagslist
-                logger.info("buildcommand: need to add tagslist field " + tag + " to " + img_path)
-                cmd.append(f'-XMP:TagsList+={tag}')
-                updated = True
-        if updated:
-            cmd.append(img_path)
-            return cmd
-        else:
-            return None
-    except Exception as e:
-        logger.error("Exception buildcommand: error " + str(e))
-        return False
 
 
 def dupe_tags(img_path):
@@ -637,7 +568,9 @@ def process_file(image_path):
 
 
         #Here we have the caption, now we need to read the captions on the files, see if they match, and if not, add any relevant tags to the image file
-        cmd = build_command(image_path, tagdict)
+        existing_tags = get_existing_tags(image_path)
+        cmd =  build_command(image_path, existing_tags)
+
         if cmd:
             logger.info("Processfile " + image_path + ".  Tags need updating")
             #logger.info(str(cmd))
@@ -680,6 +613,80 @@ def process_file(image_path):
     except Exception as e:
         logger.error("Processfile error3.  Exception: " + image_path + " " + str(e))
         return False
+
+def build_command(img_path, tags):
+    try:
+        cmd = ['exiftool', '-overwrite_original', '-P']
+        existing_xmp_tags, existing_iptc_tags, existing_CatalogSets_tags, existing_TagsList_tags = get_existing_tags(img_path)
+        updated = False
+
+        for tag in tags:
+            tag = tag.strip()
+            if tag and tag not in existing_xmp_tags:
+                print("build_command: need to add xmp field", tag, "to", img_path)
+                cmd.append(f'-XMP:Subject+={tag}')
+                updated = True
+            if tag and tag not in existing_iptc_tags:
+                print("build_command: need to add iptc field", tag, "to", img_path)
+                cmd.append(f'-iptc:keywords+={tag}')
+                updated = True
+            if tag and tag not in existing_CatalogSets_tags:
+                print("build_command: need to add catalogset field", tag, "to", img_path)
+                cmd.append(f'-XMP:CatalogSets+={tag}')
+                updated = True
+            if tag and tag not in existing_TagsList_tags:
+                print("build_command: need to add tagslist field", tag, "to", img_path)
+                cmd.append(f'-XMP:TagsList+={tag}')
+                updated = True
+
+        if updated:
+            cmd.append(img_path)
+            return cmd
+        else:
+            return None
+
+    except Exception as e:
+        print("Exception in build_command: error", str(e))
+        return False
+    
+def get_existing_tags(img_path):
+    try:
+        existing_tags = subprocess.check_output(['exiftool', '-P', '-s', '-sep', ',', '-XMP:Subject', '-IPTC:Keywords', '-XMP:CatalogSets', '-XMP:TagsList', img_path]).decode().strip()
+
+        existing_xmp_tags = []
+        existing_iptc_tags = []
+        existing_CatalogSets_tags = []
+        existing_TagsList_tags = []
+        separator = '\n'
+
+        if '\r\n' in existing_tags:
+            print("get_existing_tags: rn detected. Windows?")
+            separator = '\r\n'
+
+        for tag in existing_tags.split(separator):
+            if tag.startswith('Subject'):
+                existing_xmp_tags.extend(tag.split(':')[1].strip().split(','))
+            elif tag.startswith('Keywords'):
+                existing_iptc_tags.extend(tag.split(':')[1].strip().split(','))
+            elif tag.startswith('CatalogSets'):
+                existing_CatalogSets_tags.extend(tag.split(':')[1].strip().split(','))
+            elif tag.startswith('TagsList'):
+                existing_TagsList_tags.extend(tag.split(':')[1].strip().split(','))
+
+        if not existing_xmp_tags:
+            existing_xmp_tags = [substr for substr in existing_xmp_tags if substr]
+        if not existing_iptc_tags:
+            existing_iptc_tags = [substr for substr in existing_iptc_tags if substr]
+        if not existing_CatalogSets_tags:
+            existing_CatalogSets_tags = [substr for substr in existing_CatalogSets_tags if substr]
+        if not existing_TagsList_tags:
+            existing_TagsList_tags = [substr for substr in existing_TagsList_tags if substr]
+
+        return existing_xmp_tags, existing_iptc_tags, existing_CatalogSets_tags, existing_TagsList_tags
+
+    except Exception as e:
+        print("Exception in get_existing_tags: error", str(e))
+        return [], [], [], []
 
 
 def process_images_in_directory(directory):
