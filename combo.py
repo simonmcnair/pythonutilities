@@ -396,6 +396,7 @@ def check_and_del_text_file(file_path, words):
     if not os.path.isfile(file_path):
         # If the file doesn't exist, create it and write the words
         log_error("No text metadata file exists.  Great.  Awesome.  Super.  Smashing.")
+        return True
     else:
         # Read the contents of the text file
         with open(file_path, 'r') as file:
@@ -411,11 +412,13 @@ def check_and_del_text_file(file_path, words):
         if not input_words.issubset(file_words):
             # Append the input words to the file
             log_error("these words:  " + words + "  exist in text file but not image file. " + file_path)
+            return False
             
         else:
             log_error("Words required and present are : " + words)
             log_error("All words already present in " + file_path + " Delete the file")
             delete_file(file_path)
+            return True
 
 def is_photo_tagged(photo_path):
     try:
@@ -559,46 +562,31 @@ def process_images_in_directory(directory):
         for image_path in image_paths:
             future = executor.submit(process_file, image_path)
             futures.append(future)
-
-
-        # Iterate over completed futures
-        for future in concurrent.futures.as_completed(futures):
-            processed_images += 1
-            overall_processed_images += 1
-            completed_count = 0
-            total_count = len(futures)
-
-          #  elapsed_time = future.result()
-          #  average_time_per_image = (average_time_per_image * (processed_images - 1) + elapsed_time) / processed_images
-    #        print("Future: " + str(future))
-            # Update progress bar
-            folderprogress = processed_images / num_images
-            overallfolderprogress = overall_processed_images / overall_image_count
             
-            if future.done():
-                    completed_count += 1
-                    result = future.result()
-                    print(f"Image processed: {result} ({completed_count}/{total_count})")
+        running_count = sum(1 for future in futures if future.running())
+        
+        print ("there are " + str(running_count) + " futures running")
+            
+        completed_count = 0
+        total_count = len(futures)
 
 
-          #  log_error("Test" + progress + "." + eta)
-          #  update_progress(progress, eta) + 
         while completed_count < total_count:
             # Check if any futures are completed
+            completed_count = total_count - running_count
             for future in concurrent.futures.as_completed(futures):
+                processed_images += 1
+                overall_processed_images += 1
+                folderprogress = processed_images / num_images
+                overallfolderprogress = overall_processed_images / overall_image_count
+
                 if future.done():
                     completed_count += 1
                     result = future.result()
                     print(f"Image processed: {result} ({completed_count}/{total_count})")
-
-        while completed_count < total_count:
             # Check if any futures are completed or running
-            running_count = sum(1 for future in futures if future.running())
-            completed_count = total_count - running_count
-            print(f"Images processed: {completed_count}/{total_count}")
-
-        print("#################### current folder: " + str(processed_images) + " of " + str(num_images) + " files.     " + str(folderprogress) + '% complete')
-        print("#################### overall: " + str(overall_processed_images) + " of " + str(overall_image_count) + " files.     " + str(overallfolderprogress) + '% complete')
+            print("#################### current folder: " + str(processed_images) + " of " + str(num_images) + " files.     " + str(folderprogress) + '% complete')
+            print("#################### overall: " + str(overall_processed_images) + " of " + str(overall_image_count) + " files.     " + str(overallfolderprogress) + '% complete')
         eta = (num_images - processed_images) * average_time_per_image
         
         #for future in concurrent.futures.:
