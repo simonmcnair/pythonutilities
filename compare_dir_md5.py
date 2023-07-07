@@ -1,15 +1,14 @@
 import os
 import json
 import hashlib
-import datetime
 
 # define the two directories to compare
 dir1 = "/srv/External_6TB_1/root/Videos/"
 dir2 = "/srv/mergerfs/data/Video2"
 
 # create a set of all filenames in both directories
-dir1_files = set(os.listdir(dir1))
-dir2_files = set(os.listdir(dir2))
+dir1_files = set([f for f in os.listdir(dir1) if os.path.isfile(os.path.join(dir1, f))])
+dir2_files = set([f for f in os.listdir(dir2) if os.path.isfile(os.path.join(dir2, f))])
 all_files = dir1_files.union(dir2_files)
 
 # create an array to store the directory and filename for both directory trees
@@ -33,38 +32,29 @@ if os.path.isfile(hash_file):
 else:
     hash_dict = {}
 
-# create a log file to store filenames
-log_file = "file_log.txt"
-with open(log_file, "w") as f:
-    f.write(f"Log created on {datetime.datetime.now()}\n\n")
-
 # loop through the file array and generate a hash for each pair of identical filenames
 for i in range(len(file_array)-1):
     if file_array[i][1] == file_array[i+1][1]:
         file1 = os.path.join(file_array[i][0], file_array[i][1])
         file2 = os.path.join(file_array[i+1][0], file_array[i+1][1])
-        if file1 not in hash_dict and os.path.isfile(file1):
+        if file1 not in hash_dict:
             with open(file1, "rb") as f1:
-
-                print("Generating a hash for " + file1)
+                print("generating hash for " + file1)
                 hash1 = hashlib.sha256(f1.read()).hexdigest()
-                print(hash1 + " is hash for " +file1)
-
+                print(hash1 + " is hash for " + file1)
             hash_dict[file1] = hash1
             with open(hash_file, "w") as f:
                 json.dump(hash_dict, f)
-        if file2 not in hash_dict and os.path.isfile(file2):
+        if file2 not in hash_dict:
             with open(file2, "rb") as f2:
-                print("Generating a hash for " + file2)
+                print("generating hash for " + file2)
                 hash2 = hashlib.sha256(f2.read()).hexdigest()
-                print(hash1 + " is hash for " +file2)
+                print(hash2 + " is hash for " + file2)
             hash_dict[file2] = hash2
             with open(hash_file, "w") as f:
                 json.dump(hash_dict, f)
         if hash_dict.get(file1) == hash_dict.get(file2):
             print(f"Duplicate: {file1}, {file2}")
-            with open(log_file, "a") as f:
-                f.write(f"{file1}, {file2}\n")
 
 # create a list of filenames where the hash is not the same
 different_hashes = []
@@ -77,5 +67,9 @@ for i in range(len(file_array)-1):
 
 # print the list of filenames with different hashes
 print(f"Files with different hashes: {different_hashes}")
-with open(log_file, "a") as f:
-    f.write(f"\nFiles with different hashes: {different_hashes}")
+
+# create a set of unique hashes
+unique_hashes = set(hash_dict.values())
+
+# print the unique hashes
+print(f"Unique hashes: {unique_hashes}")
