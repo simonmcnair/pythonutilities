@@ -271,6 +271,7 @@ def process_file(image_path):
     try:
         print("Processing " + image_path)
         image = Image.open(image_path)
+        output_file = os.path.splitext(image_path)[0] + ".txt"
 
         gr_ratings, gr_output_text, gr_tags = image_to_wd14_tags(image)
 
@@ -288,27 +289,14 @@ def process_file(image_path):
                 subprocess.run(cmd)
                 if validate_tags(image_path, tagdict):
                     print("tags added correctly")
-                   # delete_file(txt_path)
+                    check_and_del_text_file(output_file,gr_output_text)
                 else:
                     log_error(f"Error: Tags were not added correctly for {image_path}")
             except Exception as e:
                 print("Error on " + image_path + ". " + str(e))
         else:
             print("no update needed")
-
-            #we want to delete any text files which have the same name and contain the same string
-            output_file = os.path.splitext(image_path)[0] + ".txt"
             check_and_del_text_file(output_file,gr_output_text)
-        
-            #delete_file(txt_path)
-
-        #output_file = os.path.splitext(image_path)[0] + ".txt"
-        #print("Writing to " + output_file)
-        # Write the caption to the output text file
-
-        #check_and_append_text_file(output_file,gr_output_text)
-        #with open(output_file, "w") as file:
-        #    file.write(gr_output_text)
     except Exception as e:
         print("error " + e)
 
