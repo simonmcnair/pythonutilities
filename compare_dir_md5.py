@@ -1,72 +1,99 @@
 import os
-import hashlib
 import json
+import hashlib
 import csv
 
-# Function to calculate SHA256 hash
-def calculate_hash(filepath):
+def create_file_list(directory1, directory2):
+    """
+    Creates an array containing the filepaths of all files recursively
+    contained in two directories, sorted by filename.
+
+    Args:
+        directory1 (str): Path to the first directory.
+        directory2 (str): Path to the second directory.
+
+    Returns:
+        list: An array of filepaths sorted by filename.
+    """
+    file_list = []
+    for directory in [directory1, directory2]:
+        for dirpath, dirnames, filenames in os.walk(directory):
+            for filename in filenames:
+                file_list.append(os.path.join(dirpath, filename))
+    return sorted(file_list, key=lambda x: os.path.basename(x))
+
+def generate_hash(filepath):
+    """
+    Generates the SHA256 hash of a file.
+
+    Args:
+        filepath (str): Path to the file.
+
+    Returns:
+        str: The hexadecimal representation of the SHA256 hash.
+    """
     with open(filepath, 'rb') as f:
-        file_data = f.read()
-        sha256_hash = hashlib.sha256()
-        sha256_hash.update(file_data)
-        return sha256_hash.hexdigest()
+        data = f.read()
+    sha256_hash = hashlib.sha256()
+    sha256_hash.update(data)
+    return sha256_hash.hexdigest()
 
-# Function to generate CSV file
-def generate_csv(filename, data):
-    with open(filename, 'w', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(['Hash', 'Filepath'])
-        for row in data:
-            writer.writerow(row)
+def process_files(file_list):
+    """
+    Processes the list of files and identifies duplicate filenames.
+    Writes the filepath and SHA256 hash of duplicates to cache.json
+    and prints them to the screen.
 
-# Function to read cache.json file
-def read_cache():
-    cache_data = []
+    Args:
+        file_list (list): An array of filepaths sorted by filename.
+    """
+    unique_hashes = {}
+    duplicate_hashes = {}
+    for filepath in file_list:
+        filename = os.path.basename(filepath)
+        file_hash = generate_hash(filepath)
+        if file_hash in unique_hashes:
+            print(f"Duplicate found: {filename} - {filepath}")
+            duplicate_hashes[file_hash] = duplicate_hashes.get(file_hash, []) + [filepath]
+        else:
+            unique_hashes[file_hash] = filepath
+
+    with open('cache.json', 'w') as f:
+        json.dump(duplicate_hashes, f, indent=4)
+
+def update_cache():
+    """
+    Reads the cache.json file and generates hashes for files without a hash.
+    """
     if os.path.exists('cache.json'):
         with open('cache.json', 'r') as f:
-            cache_data = json.load(f)
-    return cache_data
+            duplicate_hashes = json.load(f)
+        for file_hash, filepaths in duplicate_hashes.items():
+            for filepath in filepaths:
+                if not os.path.exists(filepath):
+                    continue
+                if file_hash not in unique_hashes:
+                    unique_hashes[file_hash] = filepath
 
-# Function to write cache.json file
-def write_cache(data):
-    with open('cache.json', 'w') as f:
-        json.dump(data, f)
+def write_csv():
+    """
+    Writes the unique and duplicate hashes with their filepaths to CSV files.
+    """
+    with open('unique_hashes.csv', 'w') as f1, open('duplicate_hashes.csv', 'w') as f2:
+        writer1 = csv.writer(f1)
+        writer2 = csv.writer(f2)
+        writer1.writerow(['Hash', 'Filepath'])
+        writer2.writerow(['Hash', 'Filepath'])
+        for file_hash, filepath in unique_hashes.items():
+            writer1.writerow([file_hash, filepath])
+        for file_hash, filepaths in duplicate_hashes.items():
+            for filepath in filepaths:
+                writer2.writerow([file_hash, filepath])
 
-# Function to process files in directories and create arrays
-def process_files(dir1, dir2):
-    all_files = []
-    unique_hashes = []
-    duplicate_hashes = []
-    cache_data = read_cache()
-
-    for dir_path in [dir1, dir2]:
-        for dir_name, subdir_list, file_list in os.walk(dir_path):
-             for file_name in file_list:
-               filepath = os.path.join(dir_name, file_name)
-               print("Adding " + filepath)
-               all_files.append(filepath)
-
-    all_files.sort(key=lambda x: os.path.basename(x))
-
-    for file in all_files:
-        if file not in cache_data:
-            print("Creating hash for " + file)
-            file_hash = calculate_hash(file)
-            file_data = {file, file_hash}
-           # file_data = {'Filepath': file, 'Hash': file_hash}
-            unique_hashes.append([file_hash, file])
-            print(f'{file_hash} is hash for : {file}' + str(file_data))
-            cache_data.append(file_data)
-            write_cache(cache_data)
-        else:
-            duplicate_hashes.append([file_hash, file])
-            print(f'Duplicate filepath: {file}')
-
-    generate_csv('unique_hashes.csv', unique_hashes)
-    generate_csv('duplicate_hashes.csv', duplicate_hashes)
-
-# Main program
 if __name__ == '__main__':
-    dir1 = "/srv/External_6TB_1/root/Videos/"
-    dir2 = "/srv/mergerfs/data/Video2/"
-    process_files(dir1, dir2)
+    directory1 = 'directory1_path'
+    directory2 = 'directory2_path'
+    file_list = create_file_list(directory1, directory2)
+    update_cache()
+    process_files(file_list)
+    write_csv()
