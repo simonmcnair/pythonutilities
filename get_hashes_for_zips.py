@@ -1,83 +1,61 @@
-import hashlib
 import os
 import zipfile
-import tarfile
 import rarfile
-import py7zr
+import tarfile
+import hashlib
 import csv
-from datetime import datetime
+import shutil
 
-# Function to calculate the SHA1 checksum of a file
-def sha1_checksum(file_path):
-    with open(file_path, 'rb') as f:
-        checksum = hashlib.sha1()
-        while True:
-            data = f.read(8192)
-            if not data:
-                break
-            checksum.update(data)
-    return checksum.hexdigest()
-
-# Function to generate SHA1 checksums for all files inside an archive
 def process_archive(file_path, log_writer):
-    archive_type = os.path.splitext(file_path)[1]
-    archive_name = os.path.basename(file_path)
-    
     try:
-        if archive_type == '.zip':
-            with zipfile.ZipFile(file_path, 'r') as zip_archive:
-                for member in zip_archive.infolist():
-                    if not member.is_dir():
-                        file_name = os.path.basename(member.filename)
-                        checksum = sha1_checksum(zip_archive.extract(member))
-                        log_writer.writerow([datetime.now(), file_path, archive_name, member.filename, file_name, checksum])
-    
-        elif archive_type == '.msi':
-            with zipfile.ZipFile(file_path, 'r') as msi_archive:
-                for member in msi_archive.infolist():
-                    if not member.is_dir() and member.filename.endswith('.cab'):
-                        with msi_archive.open(member) as cab_file:
-                            with py7zr.SevenZipFile(cab_file, mode='r') as cab_archive:
-                                for name in cab_archive.getnames():
-                                    if not cab_archive.getinfo(name).is_dir():
-                                        file_name = os.path.basename(name)
-                                        checksum = sha1_checksum(cab_archive.extract(name))
-                                        log_writer.writerow([datetime.now(), file_path, archive_name, member.filename, file_name, checksum])
-    
-        elif archive_type == '.tar':
-            with tarfile.open(file_path, 'r') as tar_archive:
-                for member in tar_archive.getmembers():
-                    if not member.isdir():
-                        file_name = os.path.basename(member.name)
-                        checksum = sha1_checksum(tar_archive.extractfile(member).name)
-                        log_writer.writerow([datetime.now(), file_path, archive_name, member.name, file_name, checksum])
-    
-        elif archive_type == '.rar':
-            with rarfile.RarFile(file_path, 'r') as rar_archive:
-                for member in rar_archive.infolist():
-                    if not member.isdir():
-                        file_name = os.path.basename(member.filename)
-                        checksum = sha1_checksum(rar_archive.extract(member).name)
-                        log_writer.writerow([datetime.now(), file_path, archive_name, member.filename, file_name, checksum])
-    
-        elif archive_type == '.7z':
-            with py7zr.SevenZipFile(file_path, mode='r') as seven_zip_archive:
-                for name in seven_zip_archive.getnames():
-                    if not seven_zip_archive.getinfo(name).is_dir():
-                        file_name = os.path.basename(name)
-                        checksum = sha1_checksum(seven_zip_archive.extract(name))
-                        log_writer.writerow([datetime.now(), file_path, archive_name, name, file_name, checksum])
-    except:
-        print(f"Corrupt archive: {file_path}")
-        bad_archives_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'badarchives')
-        os.makedirs(bad_archives_dir, exist_ok=True)
-        os.replace(file_path, os.path.join(bad_archives_dir, os.path.basename(file_path)))
+        archive_name = os.path.basename(file_path)
+        archive_dir = os.path.dirname(file_path)
+        archive_type = ''
+        if zipfile.is_zipfile(file_path):
+            archive_type = 'ZIP'
+            archive = zipfile.ZipFile(file_path, 'r')
+        elif rarfile.is_rarfile(file_path):
+            archive_type = 'RAR'
+            archive = rarfile.RarFile(file_path, 'r')
+        elif file_path.endswith('.tar'):
+            archive_type = 'TAR'
+            archive = tarfile.open(file_path, 'r')
+        elif file_path.endswith('.7z'):
+            archive_type = '7Z'
+            archive = py7zr.SevenZipFile(file_path, 'r')
+        elif file_path.endswith('.msi'):
+            archive_type = 'MSI'
+            archive = msilib.OpenDatabase(file_path, msilib.MSIDBOPEN_READONLY)
+        else:
+            return
+        
+        for file_info in archive.infolist():
+            if not file_info.is_dir():
+                file_name = file_info.filename
+                file_bytes = archive.read(file_name)
+                file_checksum = hashlib.sha1(file_bytes).hexdigest()
+                file_path = os.path.join(archive_dir, file_name)
+                log_writer.writerow([archive_dir, archive_name, file_path, os.path.basename(file_name), file_checksum])
+        
+        archive.close()
+        
+        # delete extracted files
+        if archive_type in ['ZIP', 'RAR', '7Z']:
+            shutil.rmtree(os.path.join(archive_dir, archive_name + '_extracted'))
+        elif archive_type == 'TAR':
+            for member in archive.getmembers():
+                if member.isreg():
+                    os.remove(os.path.join(archive_dir, member.name))
+        elif archive_type == 'MSI':
+            pass  # do nothing since MSI files don't extract to a directory
+    except Exception as e:
+        print(f"Error processing archive {file_path}: {e}")
+        shutil.move(file_path, os.path.join(archive_dir, 'badarchives'))
 
-# Function to scan a directory recursively and process all archives inside
 def scan_directory(directory_path, log_path):
     with open(log_path, 'w', newline='') as log_file:
         log_writer = csv.writer(log_file)
-        log_writer.writerow(['Timestamp', 'Archive Path', 'Archive Name', 'File Path', 'File Name', 'Checksum'])
+        log_writer.writerow(['Archive Path', 'Archive Name', 'File Path', 'File Name', 'Checksum'])
         
         for root, dirs, files in os.walk(directory_path):
             for file_name in files:
@@ -86,6 +64,7 @@ def scan_directory(directory_path, log_path):
                     process_archive(file_path, log_writer)
 
 # Test the program
-directory_path = '/srv/mergerfs/data/Software/sort2/ZIP'
+directory_path = '/srv/mergerfs/data/Software/sort2/ZIP/'
 log_path = '/srv/mergerfs/data/Software/sort2/ZIP/logfile.txt'
+
 scan_directory(directory_path, log_path)
