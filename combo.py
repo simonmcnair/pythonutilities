@@ -13,6 +13,8 @@ import subprocess
 from datetime import datetime
 import logging
 from logging.handlers import RotatingFileHandler
+from tqdm import tqdm
+
 
 import shutil
 from collections import Counter
@@ -445,47 +447,51 @@ def exiftool_get_existing_tags(img_path):
             print("LOOP " + str(loopcounter) + " for " + img_path)
             loopcounter+=1
            
-            if '\r\n' in existing_tags:
-                print("exiftool_get_existing_tags: rn detected. Windows?")
-                separator = '\r\n'
+            if not existing_tags:
+                print("image has no tags")
+                return None
+            else:
+                if '\r\n' in existing_tags:
+                    print("exiftool_get_existing_tags: rn detected. Windows?")
+                    separator = '\r\n'
 
-            if removespaces == True:
-                ret = subprocess.check_output(['exiftool','-P','-overwrite_original', '-api', '"Filter=s/^ +//"','-TagsFromFile','@','-subject','-XMP:subject','-IPTC:Keywords','-XMP:CatalogSets','-XMP:TagsList',img_path])
-                logger.info("output was " + str(ret) + " for " + img_path)
-                
-            for tag in existing_tags.split(separator):
-                logger.debug(img_path + ": exiftool_get_existing_tags : tag=" + tag)
-                for tag_type in tags_dict.keys():
-                    new = tag_type.split(':')[1]
-                    if new == 'CatalogSets':
-                        new ='Catalog Sets'
-                    if new == 'TagsList':
-                        new ='Tags List'
-                    logger.debug(img_path + ": exiftool_get_existing_tags looking for " + new)
-                    if tag.startswith(new):
-                        tag_value = tag.split(':', 1)[1].strip()  # Split using the first colon only
-                        
-                        occurrences = tag_value.count(",  ")
-                        if occurrences >0:
-                            logger.info("!!!!!!!!!!!!!!!!!!!!!!!!! multiple spaces !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
-                            print(      "!!!!!!!!!!!!!!!!!!!!!!!!! multiple spaces !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
-                            removespaces = True
-                        else:
-                            check1 = True
-                        
-                       # occurrences = tag_value.count(", ")
-                       # if occurrences >0:
-                       #     logger.info("!!!!!!!!!!!!!!!!!!!!!!!!! one leading space !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
-                       #     print(      "!!!!!!!!!!!!!!!!!!!!!!!!! one leading space !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
-                       #     removespaces = True
-                       # else:
-                            check2 = True
+                if removespaces == True:
+                    ret = subprocess.check_output(['exiftool','-P','-overwrite_original', '-api', '"Filter=s/^ +//"','-TagsFromFile','@','-subject','-XMP:subject','-IPTC:Keywords','-XMP:CatalogSets','-XMP:TagsList',img_path])
+                    logger.info("output was " + str(ret) + " for " + img_path)
+                    
+                for tag in existing_tags.split(separator):
+                    logger.debug(img_path + ": exiftool_get_existing_tags : tag=" + tag)
+                    for tag_type in tags_dict.keys():
+                        new = tag_type.split(':')[1]
+                        if new == 'CatalogSets':
+                            new ='Catalog Sets'
+                        if new == 'TagsList':
+                            new ='Tags List'
+                        logger.debug(img_path + ": exiftool_get_existing_tags looking for " + new)
+                        if tag.startswith(new):
+                            tag_value = tag.split(':', 1)[1].strip()  # Split using the first colon only
                             
-                        if check1 == True and check2 == True:
-                            logger.info("No space padding for file " + img_path + ".  Continuing")
-                            Process = False
-                        tags_dict[tag_type].extend(tag_value.split(', '))
-                        #tags_dict[tag_type].extend([tag.strip() for tag in tag_value.split(',')])
+                        #    occurrences = tag_value.count(",  ")
+                        #    if occurrences >0:
+                        #        logger.info("!!!!!!!!!!!!!!!!!!!!!!!!! multiple spaces !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
+                        #        print(      "!!!!!!!!!!!!!!!!!!!!!!!!! multiple spaces !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
+                        #        removespaces = True
+                        #   else:
+                            check1 = True
+                            
+                        # occurrences = tag_value.count(", ")
+                        # if occurrences >0:
+                        #     logger.info("!!!!!!!!!!!!!!!!!!!!!!!!! one leading space !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
+                        #     print(      "!!!!!!!!!!!!!!!!!!!!!!!!! one leading space !!!!!!!!!!!!!!!!!  Number of occurrences:" + str(occurrences) + ".  Image is " + img_path)
+                        #     removespaces = True
+                        # else:
+                            check2 = True
+                                
+                            if check1 == True and check2 == True:
+                                logger.info("No space padding for file " + img_path + ".  Continuing")
+                                Process = False
+                            tags_dict[tag_type].extend(tag_value.split(', '))
+                            #tags_dict[tag_type].extend([tag.strip() for tag in tag_value.split(',')])
 
         logger.debug(img_path + ". exiftool_get_existing_tags Exiftool output XMP:Subject      :" + str(tags_dict['XMP:Subject']))
         logger.debug(img_path + ". exiftool_get_existing_tags Exiftool output IPTC:Keywords    :" + str(tags_dict['IPTC:Keywords']))
@@ -499,9 +505,9 @@ def exiftool_get_existing_tags(img_path):
         return {}
     
 def exiftool_Update_tags(img_path, tags):
+    cmd = ['exiftool', '-overwrite_original', '-P']
     try:
-        cmd = ['exiftool', '-overwrite_original', '-P']
-        existing_tags = exiftool_get_existing_tags(img_path)
+       existing_tags = exiftool_get_existing_tags(img_path)
     except Exception as e:
         logger.error("Exception in exiftool_Update_tags: " + img_path + ".  error " + str(e))
         return False
@@ -614,6 +620,7 @@ def process_file(image_path):
     logger.info("Processfile " + " START Processing " + image_path)
     output_file = os.path.splitext(image_path)[0] + ".txt"
 
+
     if exiftool_is_photo_tagged(image_path) and not reprocess:
         logger.info(image_path + " is already tagged")
         if find_duplicate_tags_in_file(image_path) :
@@ -708,7 +715,7 @@ def Add_a_Tag(image_path, tag):
         exiftool_del_dupetags(image_path)
 
 
-def process_images_in_directory(directory, tag):
+def process_images_in_directory(directory, tag,person):
     # Process each image in the directory
     image_paths = []
     overall_processed_images = 0
@@ -739,31 +746,36 @@ def process_images_in_directory(directory, tag):
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = []
         completed_count = 0
-
+        cnt = 1
         # Submit the image processing tasks
         for image_path in image_paths:
-            if tag == "":
+            print(str(cnt) + "." + image_path)
+            cnt +=1
+            if tag == "" and person == False:
+                print("Processing as normal")
                 future = executor.submit(process_file, image_path)
                 futures.append(future)
-            else:
+            if person == True:
+                print("Add Folder as a person")
+                #parent_directory = os.path.dirname(image_path)
+                parent_directory = os.path.basename(os.path.dirname(image_path))
+                person2 =[]
+                person2.append("People/" + parent_directory)
+                #person2.append("Person/" + parent_directory)
+                print("Add " + str(person2) + " to file " + image_path + " and process as adding parent folder as person tag")
+                future = executor.submit(Add_a_Tag, image_path, person2)
+                futures.append(future)                
+            if tag != "":
+                print("Adding a tag to a file")
                 future = executor.submit(Add_a_Tag, image_path, tag)
                 futures.append(future)
 
 
-        while completed_count < num_images:
-
-            running_count = sum(1 for future in futures if future.running())
-            completed_count = sum(1 for future in futures if future.done())
-            outstanding_count = num_images - completed_count
-            progress = completed_count / num_images * 100
-            folderprogress = completed_count / num_images
-
-            overall_processed_images = num_images + completed_count
-            overall_progress = overall_processed_images / num_images * 100
-
-
-            print(f"#################### current folder: {completed_count} of {num_images} files.     {progress:.2f} % complete.  Running: {running_count}, Outstanding: {outstanding_count}")
-            #logger.info("#################### overall: " + str(overall_processed_images) + " of " + str(num_images) + " files.     " + str(overall_progress) + '% complete')
+    # Use tqdm to display progress bar
+        with tqdm(total=len(futures)) as pbar:
+            while completed_count < len(futures):
+                completed_count = sum(1 for future in futures if future.done())
+                pbar.update(completed_count - pbar.n)
 
 
     logger.info("finished")
@@ -786,19 +798,34 @@ def process_images_in_directory(directory, tag):
 # Process the images in the directory and generate captions
 #process_images_in_directory(image_directory)
 
-def execute_script(directory=None, tag=None):
+def execute_script(directory=None, tag=None, person=None):
     if directory is None:
         if os.name == 'nt':  # Windows
             #directory = r'X:\\Stable\\dif\\stable-diffusion-webui-docker\\output'
-            directory = r'Z:\\Pron\\Pics\\'
+            directory = r'Z:\Stable\dif\stable-diffusion-webui-docker\output\\'
         else:  # Linux or macOS
             directory = '/srv/dev-disk-by-uuid-e83913b3-e590-4dc8-9b63-ce0bdbe56ee9/Stable/dif/stable-diffusion-webui-docker/output'
 
-    #tag = "Nell McAndrew"
     if tag is None:
         taglist = ""  # Default value if no tag is provided
     else:
         taglist = tag.split(",")
+
+    if person is None:
+    #remember to change back
+        print("executing default of disabled")
+        personopt = False  # Default value if no tag is provided
+    elif person == 'True':
+        print("Person and personopt set to true")
+        personopt = True
+    elif person == 'False':
+        print("person and personopt set to false")
+        personopt = False
+    else:
+        print("error")
+        exit
+
+    
 
     # Change the current working directory to the specified directory
     #os.chdir(directory)
@@ -806,7 +833,7 @@ def execute_script(directory=None, tag=None):
     # Execute your script here
     # For demonstration purposes, let's print the current working directory
     #logger.info("Current working directory:", os.getcwd())
-    process_images_in_directory(directory, taglist)
+    process_images_in_directory(directory, taglist,personopt)
     logger.info("Processing complete!")
 
 def execute_single(file, tag=None):
@@ -822,15 +849,21 @@ def execute_single(file, tag=None):
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
+        print("Opts on command line " + str(len(sys.argv)))
         # Use the path provided as a command line argument
+        print("path command line " + str(sys.argv[1]))
+        print("tag arg on command line " + str(sys.argv[2]))
+        print("tag person command line " + str(sys.argv[3]))
+
         path_arg = sys.argv[1]
-        tag_arg = sys.argv[2] if len(sys.argv) > 2 else None
+        tag_arg = sys.argv[2] if len(sys.argv) >= 2 else None
+        tag_person = sys.argv[3] if len(sys.argv) >= 3 else None
         abs_path = os.path.abspath(path_arg)
 
         print("path: " + abs_path)
         if os.path.isdir(abs_path):
             # The provided argument is a directory
-            execute_script(directory=abs_path, tag=tag_arg)
+            execute_script(directory=abs_path, tag=tag_arg,person=tag_person)
         elif os.path.isfile(abs_path):
             # The provided argument is a file
             execute_single(abs_path, tag=tag_arg)
@@ -839,4 +872,5 @@ if __name__ == "__main__":
             sys.exit(1)
     else:
         # Use the predefined directory if no command line argument is provided
+        print("no opts on command line")
         execute_script()
