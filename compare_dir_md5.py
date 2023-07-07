@@ -3,75 +3,88 @@ import hashlib
 import json
 import csv
 
-def scan_directory(directory):
-    """
-    Recursively scan a directory and return a list of file paths.
-    """
-    file_paths = []
-    for dirpath, dirnames, filenames in os.walk(directory):
-        for filename in filenames:
-            file_path = os.path.join(dirpath, filename)
-            file_paths.append(file_path)
-    return file_paths
 
-def generate_hash(file_path, chunk_size=1):
-    """
-    Generate a SHA256 hash for a file.
-    """
-    print(f"Generating hash for file: {file_path}")
-    sha256 = hashlib.sha256()
-    with open(file_path, 'rb') as file:
-        while True:
-            data = file.read(chunk_size * 1024 * 1024)  # Read chunk_size MB at a time
-            if not data:
-                break
-            sha256.update(data)
-    return sha256.hexdigest()
-
-def create_json_cache(file_hashes):
-    """
-    Create a JSON cache file with file hashes.
-    """
-    with open('cache.json', 'w') as cache_file:
-        json.dump(file_hashes, cache_file, indent=4)
-
-def update_json_cache(file_hashes):
-    """
-    Update an existing JSON cache file with file hashes.
-    """
-    with open('cache.json', 'r') as cache_file:
-        existing_hashes = json.load(cache_file)
-    existing_hashes.update(file_hashes)
-    with open('cache.json', 'w') as cache_file:
-        json.dump(existing_hashes, cache_file, indent=4)
-
-def create_csv_file(file_hashes, output_file):
-    """
-    Create a CSV file with file hashes.
-    """
-    with open(output_file, 'w', newline='') as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(['Hash', 'File Path'])
-        for file_path, file_hash in file_hashes.items():
-            writer.writerow([file_hash, file_path])
-
-def process_files(dir1, dir2, chunk_size):
-    """
-    Process files in dir1 and dir2, generate hashes, and create JSON cache and CSV files.
-    """
+def get_file_hashes(dir_path, chunk_size_mb=1024):
+    """Generate file hashes for all files in a directory recursively."""
     file_hashes = {}
-    file_paths = scan_directory(dir1) + scan_directory(dir2)
-    for file_path in file_paths:
-        file_hash = generate_hash(file_path, chunk_size)
-        if file_hash not in file_hashes:
-            file_hashes[file_hash] = file_path
-        else:
-            print(f"Duplicate hash found: {file_hash}")
-            print(f"File Path: {file_path}")
-            print(f"File Path with same hash: {file_hashes[file_hash]}")
-            print("------")
-    if not os.path.exists('cache.json'):
-        create_json_cache(file_hashes)
-    else:
-        update_json_cache(file_hashes)
-    create_csv_file(file_hashes, 'unique_hashes.csv')
+    for root, dirs, files in os.walk(dir_path):
+        for file in files:
+            file_path = os.path.join(root, file)
+            print("Processing file: ", file_path)  # Print filename before hashing
+            file_hash = calculate_file_hash(file_path, chunk_size_mb)
+            if file_hash in file_hashes:
+                file_hashes[file_hash].append(file_path)
+            else:
+                file_hashes[file_hash] = [file_path]
+    return file_hashes
+
+
+def calculate_file_hash(file_path, chunk_size_mb=1024):
+    """Calculate SHA256 hash of a file."""
+    hash_object = hashlib.sha256()
+    with open(file_path, 'rb') as f:
+        while True:
+            chunk = f.read(chunk_size_mb * 1024 * 1024)
+            if not chunk:
+                break
+            hash_object.update(chunk)
+    return hash_object.hexdigest()
+
+
+def update_cache(cache_file_path, file_hashes):
+    """Update the JSON cache file with new file hashes."""
+    with open(cache_file_path, 'a') as f:
+        for file_hash, file_paths in file_hashes.items():
+            json.dump({file_hash: file_paths}, f)
+            f.write('\n')
+
+
+def read_cache(cache_file_path):
+    """Read the JSON cache file and return the cached file hashes."""
+    file_hashes = {}
+    if os.path.exists(cache_file_path):
+        with open(cache_file_path, 'r') as f:
+            for line in f:
+                file_hash, file_paths = json.loads(line).popitem()
+                file_hashes[file_hash] = file_paths
+    return file_hashes
+
+
+def write_csv(file_path, data, headers):
+    """Write data to a CSV file."""
+    with open(file_path, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        for row in data:
+            writer.writerow(row)
+
+
+def main(dir1, dir2, cache_file_path, unique_csv_file, duplicate_csv_file, chunk_size_mb=1024):
+    """Main function to scan directories, generate file hashes, update cache, and write CSV files."""
+    # Read cache file
+    file_hashes = read_cache(cache_file_path)
+
+    # Generate file hashes for dir1 and dir2
+    dir1_file_hashes = get_file_hashes(dir1, chunk_size_mb)
+    dir2_file_hashes = get_file_hashes(dir2, chunk_size_mb)
+
+    # Update cache with new file hashes
+    file_hashes.update(dir1_file_hashes)
+    file_hashes.update(dir2_file_hashes)
+    update_cache(cache_file_path, file_hashes)
+
+    # Get unique file hashes and duplicate file hashes
+    unique_hashes = [(file_hash, file_paths[0]) for file_hash, file_paths in file_hashes.items() if len(file_paths) == 1]
+    duplicate_hashes = [(file_hash, file_paths) for file_hash, file_paths in file_hashes.items() if len(file_paths) > 1]
+
+    # Write unique and duplicate file hashes to CSV files
+    write_csv(unique_csv_file, unique_hashes, ['File Hash', 'File Path'])
+    write_csv(duplicate_csv_file, duplicate_hashes, ['File Hash', 'File Paths'])
+
+
+if __name__ == '__main__':
+    # Directory paths and file paths
+    dir1 = 'path/to/dir1'
+    dir2 = 'path/to/dir2'
+    cache_file_path = 'cache.json'
+    unique_csv_file
