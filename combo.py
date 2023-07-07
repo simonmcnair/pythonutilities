@@ -14,6 +14,7 @@ from datetime import datetime
 import logging
 from logging.handlers import RotatingFileHandler
 
+import shutil
 from collections import Counter
 
 #pip install opencv-python pillow huggingface_hub onnxruntime
@@ -280,6 +281,7 @@ def check_and_del_text_file(file_path, words):
     except Exception as e:
         logger.error("Exception check_and_del_text_file: " + "Error for " + file_path + ". Retcode: " + str(e.returncode) + " check and del text file:" + str(e.output) + ".")
         return False
+    
 def check_and_append_text_file(file_path, words):
     # Check if the file exists
     try:
@@ -333,24 +335,51 @@ def delete_file(file_path):
         logger.info(file_path + ".  Can only delete text files")
         return True
 
-    
+
+def move_file_to_prefixed_folder(filepath, text_string):
+    cwd = os.getcwd()
+    abs_filepath = os.path.abspath(filepath)
+    rel_filepath = os.path.relpath(abs_filepath, cwd)
+
+    filename = os.path.basename(rel_filepath)
+    new_folder_path = os.path.join(text_string, os.path.dirname(rel_filepath))
+    new_file_path = os.path.join(new_folder_path, filename)
+
+    logger.info("move_file_to_prefixed_folder: Moved " + filepath + " to " + new_file_path)
+
+    os.makedirs(new_folder_path, exist_ok=True)
+    shutil.move(rel_filepath, new_file_path)
+
 def exiftool_del_dupetags(path):
     logger.info("exiftool_del_dupetags: " + path + ": Removing duplicate tags")
     try:
-        output = subprocess.check_output(['exiftool', \
-                                              '-overwrite_original' ,\
-                                              '-P',\
-                                              '-m', \
-                                              '-sep', \
-                                              '''##''', \
-                                              '''-XMP:Subject<${XMP:Subject;NoDups(1)}''', \
-                                              '''-IPTC:Keywords<${IPTC:Keywords;NoDups(1)}''', \
-                                              '''-XMP:CatalogSets<${XMP:CatalogSets;NoDups(1)}''', \
-                                              '''-XMP:TagsList<${XMP:TagsList;NoDups(1)}''',path],stderr=subprocess.STDOUT, universal_newlines=True)
-        logger.info("exiftool_del_dupetags MODIFY success IPTC: " + path + ". output: " + output)
+        output_xmp = subprocess.check_output(['exiftool', '-overwrite_original' ,'-P', '-m', '-sep', '''##''', '''-XMP:Subject<${XMP:Subject;NoDups(1)}''', path], stderr=subprocess.STDOUT, universal_newlines=True)
+        logger.info("exiftool_del_dupetags MODIFY success XMP: " + path + ". output: " + output_xmp)
+    except Exception as e:
+        logger.error("Exception in exiftool_del_dupetags XMP: " + path + ". Error: " + str(e))
+        return False
+
+    try:
+        output_iptc = subprocess.check_output(['exiftool', '-overwrite_original', '-P', '-m', '-sep', '''##''', '''-IPTC:Keywords<${IPTC:Keywords;NoDups(1)}''', path], stderr=subprocess.STDOUT, universal_newlines=True)
+        logger.info("exiftool_del_dupetags MODIFY success IPTC: " + path + ". output: " + output_iptc)
     except Exception as e:
         logger.error("Exception in exiftool_del_dupetags IPTC: " + path + ". Error: " + str(e))
         return False
+
+    try:
+        output_CatalogSets = subprocess.check_output(['exiftool', '-overwrite_original' ,'-P', '-m', '-sep', '''##''', '''-XMP:CatalogSets<${XMP:CatalogSets;NoDups(1)}''', path], stderr=subprocess.STDOUT, universal_newlines=True)
+        logger.info("exiftool_del_dupetags MODIFY success CatalogSets: " + path + ". output: " + output_CatalogSets)
+    except Exception as e:
+        logger.error("Exception in exiftool_del_dupetags CatalogSets: " + path + ". Error: " + str(e))
+        return False
+
+    try:
+        output_TagsList = subprocess.check_output(['exiftool', '-overwrite_original', '-P', '-m', '-sep', '''##''', '''-XMP:TagsList<${XMP:TagsList;NoDups(1)}''', path], stderr=subprocess.STDOUT, universal_newlines=True)
+        logger.info("exiftool_del_dupetags MODIFY success Tagslist: " + path + ". output: " + output_TagsList)
+    except Exception as e:
+        logger.error("Exception in exiftool_del_dupetags TagsList: " + path + ". Error: " +  str(e))
+        return False
+
     return True
 
 def exiftool_copy_XMPSubject_to_TagsList(path):
@@ -374,7 +403,9 @@ def exiftool_is_photo_tagged(photo_path):
             return False
     except Exception as e:
         logger.error("Exception exiftool_is_photo_tagged: "+ photo_path + ".  Error " + str(e.returncode) + ".  " + str(e.output) + ".")
+        move_file_to_prefixed_folder(photo_path, 'badfiles')
         return False
+
 def exiftool_make_photo_tagged(is_tagged, photo_path):
     try:
         if not exiftool_is_photo_tagged(photo_path) :
@@ -406,9 +437,10 @@ def exiftool_batch_untag(path):
         logger.error("Exception " + str(e.returncode) + ".  " + str(e.output) + ".  From " + path)
         return False
 
+
 def exiftool_get_existing_tags(img_path):
     try:
-        existing_tags = subprocess.check_output(['exiftool', '-P', '-s', '-XMP:Subject', '-IPTC:Keywords', '-XMP:CatalogSets', '-XMP:TagsList', img_path]).decode().strip()
+        existing_tags = subprocess.check_output(['exiftool', '-XMP:Subject', '-IPTC:Keywords', '-XMP:CatalogSets', '-XMP:TagsList', img_path]).decode().strip()
 
         tags_dict = {
             'XMP:Subject': [],
@@ -583,6 +615,7 @@ def process_file(image_path):
         logger.info("image: " + image_path + " successfully opened.  Continue processing ")
     except Exception as e:
         logger.error("Processfile Exception1: " + " failed to open image : " + image_path + ". FAILED Error: " + str(e) + ".  Skipping")
+        move_file_to_prefixed_folder(image_path, 'badfiles')
         return False
 
     try:
@@ -661,7 +694,8 @@ def process_images_in_directory(directory, tag):
     logger.info("Starting")
 
     logger.info("fetching file list.  This could take a while.")
-    for root, dirs, files in sorted(os.walk(directory)):
+    for root, dirs, files in os.walk(directory):
+#    for root, dirs, files in sorted(os.walk(directory)):
         #files.sort()
         for file in files:
             # Check if the file is an image
