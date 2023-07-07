@@ -6,54 +6,60 @@ import hashlib
 dir1 = "/srv/External_6TB_1/root/Videos/"
 dir2 = "/srv/mergerfs/data/Video2"
 
-# Define the JSON file to store the hashes in
-json_file = "hashes.json"
+# define the json file to store the hashes
+hash_file = "hashes.json"
 
-# Create an empty array to store the directory and filename for each file
+# create an empty list to store the file paths and names
 file_list = []
 
-# Recursively search through dir1 and append directory and filename to file_list
+# recursively traverse both directories and store the file paths and names
 for root, dirs, files in os.walk(dir1):
     for file in files:
-        file_path = os.path.join(root, file)
-        print("adding " + file_path)
-        file_list.append((dir1, file_path))
+        print("Adding " + file)
+        file_list.append((root, file))
 
-# Recursively search through dir2 and append directory and filename to file_list
 for root, dirs, files in os.walk(dir2):
     for file in files:
-        file_path = os.path.join(root, file)
-        print("adding " + file_path)
-        file_list.append((dir2, file_path))
+        print("Adding " +file)
+        file_list.append((root, file))
 
-# Sort the file list by filename
+# sort the file list by filename
 file_list.sort(key=lambda x: x[1])
 
-# Load existing hashes from JSON file
-if os.path.isfile(json_file):
-    with open(json_file) as f:
+# open the hash file and load the existing hashes (if any)
+hashes = {}
+if os.path.exists(hash_file):
+    with open(hash_file, "r") as f:
         hashes = json.load(f)
-else:
-    hashes = {}
 
-# Loop through each file in file_list and generate hash if not already present
-for directory, filename in file_list:
-    if filename not in hashes:
-        print("Creating a hash for " + filename)
-        with open(os.path.join(directory, filename), "rb") as f:
-            file_bytes = f.read()
-            file_hash = hashlib.sha256(file_bytes).hexdigest()
-            hashes[filename] = file_hash
-            print(file_hash + "is hash for", filename)
+# iterate through the file list and generate hashes for files without one
+for path, file in file_list:
+    full_path = os.path.join(path, file)
+    if full_path not in hashes:
+        print("Hashing " + full_path)
+        with open(full_path, "rb") as f:
+            hash_object = hashlib.sha256()
+            hash_object.update(f.read())
+            hash_value = hash_object.hexdigest()
+        hashes[full_path] = hash_value
+        print(f"Generated hash for {full_path}: {hash_value}")
+
     else:
-        print("Hash already exists for", filename)
+        print(f"Skipping {full_path}, already hashed")
+        # check for duplicates and print them
+        duplicate_paths = [p for p in hashes.keys() if hashes[p] == hashes[full_path]]
+        if duplicate_path is not None:
+            print(f"Duplicate hash value {hashes[full_path]} found for {full_path} and {duplicate_path}")
+        else:
+            print(f"No duplicate hash value found for {full_path}")
 
-# Write updated hashes to JSON file
-with open(json_file, "w") as f:
-    json.dump(hashes, f)
+# write the updated hash file
+with open(hash_file, "w") as f:
+    json.dump(hashes, f, indent=4)
 
-# Create file containing all unique hashes
-unique_hashes = set(hashes.values())
+# create a file containing all unique hash values
+unique_hashes = list(set(hashes.values()))
+unique_hashes.sort()
 with open("unique_hashes.txt", "w") as f:
-    for hash in unique_hashes:
-        f.write(hash + "\n")
+    for hash_value in unique_hashes:
+        f.write(hash_value + "\n")
