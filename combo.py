@@ -216,7 +216,7 @@ def check_and_append_text_file(file_path, words):
 
 
 
-def image_to_wd14_tags(filename, image:Image.Image) \
+def image_to_wd14_tags(image:Image.Image) \
         -> Tuple[Mapping[str, float], str, Mapping[str, float]]:
     try:
         model = WAIFU_MODELS['wd14-vit-v2']
@@ -239,7 +239,7 @@ def image_to_wd14_tags(filename, image:Image.Image) \
 
         return ratings, output_text, filtered_tags
     except Exception as e:
-        logger.error("Exception getting tags from image " + filename + ". " + str(e))
+        logger.error("error " + str(e))
 
 def build_command(img_path, tags):
     try:
@@ -309,7 +309,7 @@ def build_command(img_path, tags):
         else:
             return None
     except Exception as e:
-        logger.error("Exception buildcommand: error " + str(e))
+        logger.error("buildcommand: error " + str(e))
 
 
 def dupe_tags(img_path):
@@ -385,7 +385,7 @@ def dupe_tags(img_path):
             logger.info("dupe_tags: " + img_path + ".  No Duplicate tags.")
             return False
     except subprocess.CalledProcessError as e:
-        logger.error("Exception dupe_tags: " + img_path + ".  Error " + str(e.returncode) + " removing duplicate tags:" + str(e.output) + ".")
+        logger.info("dupe_tags: " + img_path + ".  Error " + str(e.returncode) + " removing duplicate tags:" + str(e.output) + ".")
         return False
 
 def validate_tags(img_path, tags):
@@ -472,7 +472,7 @@ def validate_tags(img_path, tags):
             return False
         return True
     except subprocess.CalledProcessError as e:
-        logger.error("Exception validate_tags: " + img_path + ".  Error " + str(e.returncode) + " removing duplicate tags:" + str(e.output) + ".")
+        logger.info("validate_tags: " + img_path + ".  Error " + str(e.returncode) + " removing duplicate tags:" + str(e.output) + ".")
         return False
 
 def deldupetags(path):
@@ -489,7 +489,7 @@ def deldupetags(path):
         logger.info("deldupetags: " + path + ": TagsList output was " + output_TagsList)
         return True
     except subprocess.CalledProcessError as e:
-        logger.error("Exception deldupetags: " + "Error for " + path + ". Retcode: " + str(e.returncode) + " removing duplicate tags:" + str(e.output) + ".")
+        logger.info("deldupetags: " + "Error for " + path + ". Retcode: " + str(e.returncode) + " removing duplicate tags:" + str(e.output) + ".")
         return False
     
 
@@ -530,7 +530,7 @@ def check_and_del_text_file(file_path, words):
                 logger.info("check_and_del_text_file: " + file_path + " is not a csv file.  Skipping")
                 return True
     except subprocess.CalledProcessError as e:
-        logger.error("Exception check_and_del_text_file: " + "Error for " + file_path + ". Retcode: " + str(e.returncode) + " check and del text file:" + str(e.output) + ".")
+        logger.info("check_and_del_text_file: " + "Error for " + file_path + ". Retcode: " + str(e.returncode) + " check and del text file:" + str(e.output) + ".")
         return False
  
 def is_photo_tagged(photo_path):
@@ -544,7 +544,7 @@ def is_photo_tagged(photo_path):
             #logger.info(photo_path + " untagged.")
             return False
     except subprocess.CalledProcessError as e:
-        logger.error("Exception is_photo_tagged: "+ "Error " + str(e.returncode) + ".  " + str(e.output) + ".")
+        logger.info("is_photo_tagged: "+ "Error " + str(e.returncode) + ".  " + str(e.output) + ".")
         return False
 
 def make_photo_tagged(photo_path):
@@ -559,7 +559,7 @@ def make_photo_tagged(photo_path):
             logger.info(photo_path + " is already tagged.  Not modifying")
             return True
     except subprocess.CalledProcessError as e:
-        logger.error("Exception " + str(e.returncode) + ".  " + str(e.output) + ".  From " + photo_path)
+        logger.info("Error " + str(e.returncode) + ".  " + str(e.output) + ".  From " + photo_path)
         return False
 
 def make_photo_untagged(photo_path):
@@ -570,7 +570,7 @@ def make_photo_untagged(photo_path):
             return True
         return False
     except subprocess.CalledProcessError as e:
-        logger.error("Exception: " + str(e.returncode) + ".  " + str(e.output) + ".  From " + photo_path)
+        logger.info("Error " + str(e.returncode) + ".  " + str(e.output) + ".  From " + photo_path)
         return False
 
 def delete_file(file_path):
@@ -580,14 +580,11 @@ def delete_file(file_path):
             logger.info("Deleted file: " + file_path)
             return True
         except OSError as e:
-            logger.error("Exception deleting file: " + file_path + ". " + str(e))
+            logger.info("Error deleting file: " + file_path)
+            logger.info(str(e))
             return False
-        except subprocess.CalledProcessError as e:
-            logger.error("Exception: " + str(e.returncode) + ".  " + str(e.output) + ".  From " + file_path)
-            return False
-        
     else:
-        logger.info(file_path + ".  Can only delete text files")
+        logger.info("can only delete text files")
         return True
 
 def process_file(image_path):
@@ -616,7 +613,7 @@ def process_file(image_path):
             return False
 
         try:
-            gr_ratings, gr_output_text, gr_tags = image_to_wd14_tags(image_path, image)
+            gr_ratings, gr_output_text, gr_tags = image_to_wd14_tags(image)
             #gr_output_text = gr_output_text + ',tagged'
             tagdict = gr_output_text.split(",")
             logger.info("Processfile " + image_path + ".  caption: " + gr_output_text)
@@ -628,7 +625,7 @@ def process_file(image_path):
         try:
             tagdict = [substr for substr in tagdict if substr]
         except Exception as e:
-            logger.error("Processfile substr Error " + ".  Well that didn't work.")
+            logger.error("Processfile substr" + "Well that didn't work.")
 
 
         #Here we have the caption, now we need to read the captions on the files, see if they match, and if not, add any relevant tags to the image file
@@ -638,7 +635,7 @@ def process_file(image_path):
             #logger.info(str(cmd))
             try:
                 ret = subprocess.run(cmd, stderr=subprocess.STDOUT, universal_newlines=True)
-                logger.debug("Processfile " + image_path + ".  Exiftool update completed successfully.  " + str(ret))
+                logger.debug("Processfile " + image_path + ".  Exiftool update completed without error.  " + str(ret))
                 #if ret.returncode == 0 :
                 #    logger.info("Exiftool completed successfully: " + str(ret.returncode))
             except Exception as e:
